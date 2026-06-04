@@ -1,0 +1,203 @@
+"""Dictation daemon: hold hotkey -> record -> transcribe -> emit text.
+
+Listener callbacks never block on inference: the utterance is handed to a
+worker thread via a queue, and utterances are emitted in order.
+"""
+
+from __future__ import annotations
+
+import logging
+import queue
+import shutil
+import subprocess
+import threading
+import time
+
+import numpy as np
+
+from ..audio.capture import Recorder
+from ..config import Config
+from ..engine.backend import AsrBackend, TranscribeOptions
+from .hotkey import Hotkey, parse_hotkey
+from .listeners import make_listener
+from .output import make_output
+from .postprocess import postprocess
+
+log = logging.getLogger(__name__)
+
+
+def _notify(summary: str, body: str = "") -> None:
+    if shutil.which("notify-send"):
+        subprocess.Popen(
+            ["notify-send", "-a", "local-stt", "-t", "1200", summary, body],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
+class DictationDaemon:
+    def __init__(self, config: Config, backend: AsrBackend, on_state=None):
+        self.config = config
+        self.backend = backend
+        self.hotkey: Hotkey = parse_hotkey(config.dictation.hotkey)
+        self.output = make_output(config.dictation.output)
+        self.recorder = Recorder()
+        self.on_state = on_state  # optional callback: 'idle'|'recording'|'transcribing'
+        self._queue: queue.Queue[np.ndarray | None] = queue.Queue()
+        self._listener = None
+        self._worker: threading.Thread | None = None
+        # guards the start/stop transition (the cap timer fires from its own
+        # thread and may race the hotkey)
+        self._utt_lock = threading.Lock()
+        self._cap_timer: threading.Timer | None = None
+
+    def _state(self, state: str) -> None:
+        if self.on_state:
+            try:
+                self.on_state(state)
+            except Exception:
+                log.exception("state callback failed")
+
+    # -- listener callbacks (must stay fast; never block) -----------------------
+
+    def _on_activate(self) -> None:
+        """Combo pressed. hold: start recording; toggle: flip start/stop."""
+        if self.config.dictation.mode == "toggle" and self.recorder.recording:
+            self._end_utterance()
+            return
+        self._begin_utterance()
+
+    def _on_deactivate(self) -> None:
+        """Trigger released. Only meaningful in hold (push-to-talk) mode."""
+        if self.config.dictation.mode == "hold":
+            self._end_utterance()
+
+    def _begin_utterance(self) -> None:
+        with self._utt_lock:
+            if self.recorder.recording:
+                return
+            self.recorder.start()
+            self._arm_cap_timer()
+        log.info("recording...")
+        self._state("recording")
+        if self.config.dictation.notify:
+            body = (
+                f"press {self.config.dictation.hotkey} again to stop"
+                if self.config.dictation.mode == "toggle"
+                else ""
+            )
+            _notify("● Recording", body)
+
+    def _arm_cap_timer(self) -> None:
+        """In toggle mode, auto-stop after max_duration_ms so a forgotten
+        recording can't run forever. Caller holds _utt_lock."""
+        cap = self.config.dictation.max_duration_ms
+        if self.config.dictation.mode == "toggle" and cap > 0:
+            self._cap_timer = threading.Timer(cap / 1000, self._auto_stop)
+            self._cap_timer.daemon = True
+            self._cap_timer.start()
+
+    def _auto_stop(self) -> None:
+        log.info("auto-stopping: max recording duration reached")
+        if self.config.dictation.notify:
+            _notify("■ Auto-stopped", "max recording length reached")
+        self._end_utterance()
+
+    def _end_utterance(self) -> None:
+        with self._utt_lock:
+            if not self.recorder.recording:
+                return
+            if self._cap_timer is not None:
+                self._cap_timer.cancel()
+                self._cap_timer = None
+            pcm = self.recorder.stop()
+        ms = len(pcm) / 16.0
+        if ms < self.config.dictation.min_duration_ms:
+            log.info("discarded %dms utterance (too short)", ms)
+            self._state("idle")
+            return
+        log.info("captured %.1fs, transcribing...", ms / 1000)
+        self._state("transcribing")
+        self._queue.put(pcm)
+
+    # -- worker -----------------------------------------------------------------
+
+    def _worker_loop(self):
+        opts = TranscribeOptions(
+            language=self.config.model.language or None,
+            vad_min_silence_ms=250,  # dictation: split on short pauses
+        )
+        while True:
+            pcm = self._queue.get()
+            if pcm is None:
+                return
+            t0 = time.monotonic()
+            try:
+                transcript = self.backend.transcribe_audio(pcm, 16000, opts)
+            except Exception:
+                log.exception("transcription failed")
+                self._state("idle")
+                continue
+            text = postprocess(
+                transcript.text, append_space=self.config.dictation.append_space
+            )
+            elapsed = time.monotonic() - t0
+            self._state("idle")
+            if not text.strip():
+                log.info("no speech detected (%.2fs)", elapsed)
+                continue
+            log.info("(%.2fs) %s", elapsed, text.strip())
+            if self.config.dictation.notify:
+                _notify("✓ " + text.strip()[:80])
+            try:
+                self.output.emit(text)
+            except Exception:
+                log.exception("failed to emit text")
+
+    # -- lifecycle ----------------------------------------------------------------
+
+    def start(self) -> None:
+        """Non-blocking: load the model, start the worker and key listener."""
+        log.info("loading model %s...", self.config.model.name)
+        self.backend.load()  # pay the load cost now, not on first utterance
+        # warm the kernels so the first real utterance isn't slow
+        self.backend.transcribe_audio(
+            np.zeros(8000, dtype=np.float32), 16000, TranscribeOptions()
+        )
+        verb = "hold" if self.config.dictation.mode == "hold" else "press"
+        log.info("ready — %s %s to dictate", verb, self.config.dictation.hotkey)
+
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
+        self._listener = make_listener(
+            self.config.dictation.listener,
+            self.hotkey,
+            on_activate=self._on_activate,
+            on_deactivate=self._on_deactivate,
+        )
+        self._listener.start()
+        self._state("idle")
+
+    def stop(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+        if self._cap_timer is not None:
+            self._cap_timer.cancel()
+            self._cap_timer = None
+        if self.recorder.recording:
+            self.recorder.stop()
+        if self._worker is not None:
+            self._queue.put(None)
+            self._worker.join(timeout=30)
+            self._worker = None
+
+    def run(self) -> None:
+        """Blocking foreground mode (stt dictate)."""
+        self.start()
+        try:
+            self._listener.join()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.stop()

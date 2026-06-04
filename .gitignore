@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# uv / virtualenv
+.venv/
+# uv.lock IS committed — this is an application, so a pinned lockfile gives
+# anyone who clones a reproducible install.
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Stray runtime artifacts (recordings/transcripts live under ~/Documents and
+# ~/.cache, not the project tree)
+*.tmp

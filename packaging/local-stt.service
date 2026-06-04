@@ -1,0 +1,17 @@
+[Unit]
+Description=local-stt tray (dictation + meeting transcription)
+# Ordering only — Cinnamon doesn't always activate graphical-session.target
+# in the systemd user manager, so we install into default.target below.
+After=graphical-session.target
+
+[Service]
+Type=simple
+# X11 display. Usually already imported into the user manager; set here as a
+# fallback. On a non-default display, change to your $DISPLAY value.
+Environment=DISPLAY=:0
+ExecStart=%h/.local/bin/stt tray
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
