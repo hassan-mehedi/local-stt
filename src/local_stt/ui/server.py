@@ -10,19 +10,36 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import socketserver
+import sys
 import threading
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from ..config import Config, load_config, save_config
+from .. import permissions
+from ..config import (
+    Config,
+    default_model,
+    load_config,
+    load_onboarding,
+    mark_onboarding_done,
+    save_config,
+    save_onboarding,
+)
+from ..desktop import app_bundle
 from ..engine import models
 from .state import clear_state, write_state
 
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+PAGES = {"/": "settings.html", "/onboarding": "onboarding.html"}
+ASSETS = {
+    "/static/common.css": "text/css; charset=utf-8",
+    "/static/common.js": "text/javascript; charset=utf-8",
+}
 
 class Controller:
     """Interface the tray implements for live actions. The default no-op
@@ -38,6 +55,15 @@ class Controller:
 
     def current_model(self) -> str | None:
         return None
+
+    def dictation_state(self) -> str:
+        return "off"
+
+    def start_dictation(self) -> str | None:
+        return "dictation runs in the menu bar app; start it with: stt tray"
+
+    def finish_onboarding(self) -> None:
+        mark_onboarding_done()
 
 
 def build_state(controller: Controller) -> dict:
@@ -55,11 +81,29 @@ def build_state(controller: Controller) -> dict:
         }
         for spec in models.MODELS.values()
     ]
+    downloading = _downloads.status()
     return {
         "config": asdict(cfg),
+        "platform": sys.platform,
+        "default_model": default_model(),
+        "onboarding": load_onboarding(),
         "daemon_running": controller.daemon_running(),
+        "dictation_state": controller.dictation_state(),
         "models": model_list,
-        "downloading": _downloads.status(),
+        "downloading": downloading,
+        "progress": {
+            name: models.download_progress(name)
+            for name, s in downloading.items() if s == "running"
+        },
+    }
+
+
+def permissions_state() -> dict:
+    return {
+        "supported": permissions.supported(),
+        "status": permissions.status(),
+        "login_item": permissions.login_item(),
+        "app_bundle": app_bundle() is not None,
     }
 
 
@@ -151,12 +195,18 @@ def make_handler(token: str, controller: Controller):
 
         def do_GET(self):
             path = urlparse(self.path).path
-            if path == "/":
-                return self._serve_page()
+            if path in PAGES:
+                return self._serve_file(PAGES[path], "text/html; charset=utf-8")
+            if path in ASSETS:
+                return self._serve_file(path.removeprefix("/static/"), ASSETS[path])
+            if not path.startswith("/api/"):
+                return self._send_json({"error": "not found"}, 404)  # e.g. favicon.ico
             if not self._authed():
                 return self._send_json({"error": "unauthorized"}, 401)
             if path == "/api/state":
                 return self._send_json(build_state(controller))
+            if path == "/api/permissions":
+                return self._send_json(permissions_state())
             return self._send_json({"error": "not found"}, 404)
 
         def do_POST(self):
@@ -171,6 +221,21 @@ def make_handler(token: str, controller: Controller):
                     return self._send_json({"ok": True})
                 if path == "/api/models/remove":
                     models.remove(self._read_json()["name"])
+                    return self._send_json({"ok": True})
+                if path == "/api/permissions/request":
+                    permissions.request(self._read_json()["name"])
+                    return self._send_json(permissions_state())
+                if path == "/api/login-item":
+                    permissions.set_login_item(bool(self._read_json()["enabled"]))
+                    return self._send_json(permissions_state())
+                if path == "/api/dictation/start":
+                    error = controller.start_dictation()
+                    return self._send_json({"ok": error is None, "error": error})
+                if path == "/api/onboarding/step":
+                    save_onboarding(step=int(self._read_json()["step"]))
+                    return self._send_json({"ok": True})
+                if path == "/api/onboarding/done":
+                    controller.finish_onboarding()
                     return self._send_json({"ok": True})
             except ValueError as e:  # ConfigError, unknown model, bad JSON
                 return self._send_json({"error": str(e)}, 400)
@@ -190,15 +255,25 @@ def make_handler(token: str, controller: Controller):
                 "reload_error": reload_error,
             })
 
-        def _serve_page(self):
-            html = (STATIC_DIR / "settings.html").read_bytes()
+        def _serve_file(self, name: str, content_type: str):
+            body = (STATIC_DIR / name).read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html)))
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(html)
+            self.wfile.write(body)
 
     return Handler
+
+
+class _LocalServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind resolves the host name with a reverse DNS
+        # lookup, which stalls for good inside the app bundle; the name is
+        # known anyway
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class SettingsServer:
@@ -211,13 +286,17 @@ class SettingsServer:
 
     def start(self) -> str:
         handler = make_handler(self.token, self.controller)
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self._httpd = _LocalServer(("127.0.0.1", 0), handler)
         port = self._httpd.server_address[1]
         self.url = write_state(port, self.token)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._thread.start()
         log.info("settings server at %s", self.url)
         return self.url
+
+    def page_url(self, page: str) -> str:
+        port = self._httpd.server_address[1]
+        return f"http://127.0.0.1:{port}/{page}?token={self.token}"
 
     def stop(self) -> None:
         if self._httpd is not None:

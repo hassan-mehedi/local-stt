@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 # argv keeps quotes in the text from breaking the AppleScript
 _OSASCRIPT_NOTIFY = [
@@ -33,3 +34,8 @@ def open_target(target: str) -> None:
     """Open a folder, file or URL with the default app."""
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     subprocess.Popen([opener, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def app_bundle() -> Path | None:
+    """The local-stt.app this runs from, or None for a source install."""
+    return next((p for p in Path(__file__).resolve().parents if p.suffix == ".app"), None)

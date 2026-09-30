@@ -113,6 +113,17 @@ def is_downloaded(name: str) -> bool:
     return (d / "model.bin").exists()
 
 
+def download_progress(name: str) -> float | None:
+    """Share of the expected size on disk so far, or None while a
+    conversion runs (it downloads into a temp dir first)."""
+    s = spec(name)
+    if s.convert_from or not s.size_mb:
+        return None
+    d = model_dir(name)
+    done = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) if d.is_dir() else 0
+    return min(done / (s.size_mb * 1_000_000), 0.99)
+
+
 def download(name: str) -> Path:
     """Download a model into the local cache; returns its directory."""
     s = spec(name)

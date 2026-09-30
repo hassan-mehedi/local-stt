@@ -12,6 +12,7 @@ import os
 import signal
 import sys
 
+from ..desktop import open_target
 from .icons import ensure_icons, icon_name
 
 log = logging.getLogger(__name__)
@@ -80,6 +81,12 @@ class GtkShell:
             mi.set_visible(title is not None)
             if title is not None:
                 mi.set_label(title)
+
+    def show_page(self, url: str, title: str) -> None:
+        open_target(url)
+
+    def close_page(self) -> None:
+        pass  # the page is a browser tab, which the page can't close
 
     def run(self, on_signal) -> None:
         """on_signal runs for Ctrl+C and SIGTERM (systemd stop)."""

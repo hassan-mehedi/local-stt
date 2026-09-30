@@ -25,6 +25,8 @@ from AppKit import (
 from Foundation import NSObject
 from PyObjCTools import AppHelper
 
+from .window_mac import PageWindow, install_main_menu
+
 log = logging.getLogger(__name__)
 
 # state -> (SF Symbol, color); None renders as a template image, which
@@ -55,6 +57,7 @@ class MacShell:
         self._status_item = None
         self._target = None
         self._items: list[tuple] = []  # (NSMenuItem, label function)
+        self._window = None
 
     def build(self, rows) -> None:
         self._status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
@@ -80,6 +83,7 @@ class MacShell:
             menu.addItem_(item)
             self._items.append((item, label))
         self._status_item.setMenu_(menu)
+        install_main_menu()
         self._set_state("off")
         log.info("menu bar app running")
 
@@ -112,6 +116,18 @@ class MacShell:
             item.setHidden_(title is None)
             if title is not None:
                 item.setTitle_(title)
+
+    def show_page(self, url: str, title: str) -> None:
+        AppHelper.callAfter(self._show_page, url, title)
+
+    def _show_page(self, url: str, title: str) -> None:
+        if self._window is None:
+            self._window = PageWindow()
+        self._window.show(url, title)
+
+    def close_page(self) -> None:
+        if self._window is not None:
+            AppHelper.callAfter(self._window.close)
 
     def run(self, on_signal) -> None:
         """on_signal runs for Ctrl+C and for launchd's SIGTERM. Python's own

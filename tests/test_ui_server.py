@@ -25,6 +25,12 @@ class FakeController(Controller):
             self.running = False
         return self.reload_error
 
+    def start_dictation(self):
+        return "Model 'large-v3' is not downloaded."
+
+    def finish_onboarding(self):
+        self.finished = True
+
 
 @pytest.fixture
 def server(tmp_path, monkeypatch):
@@ -112,3 +118,59 @@ def test_model_endpoints_reject_unknown_names(server, endpoint, tmp_path):
 
 
 import urllib.error  # noqa: E402  (used in tests above)
+
+
+def _get_raw(srv, path):
+    url = f"http://127.0.0.1:{srv._httpd.server_address[1]}{path}"
+    with urllib.request.urlopen(url) as r:
+        return r.status, r.headers["Content-Type"], r.read().decode()
+
+
+@pytest.mark.parametrize("path, kind, marker", [
+    ("/onboarding", "text/html", "Welcome to local-stt"),
+    ("/static/common.js", "text/javascript", "function hotkeyCapture"),
+    ("/static/common.css", "text/css", ".model"),
+])
+def test_pages_and_assets_load_without_the_token(server, path, kind, marker):
+    status, content_type, body = _get_raw(server, path)
+    assert status == 200
+    assert content_type.startswith(kind)
+    assert marker in body
+
+
+@pytest.mark.parametrize("path", ["/favicon.ico", "/static/../server.py"])
+def test_other_paths_are_not_found(server, path):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get_raw(server, path)
+    assert exc.value.code == 404
+
+
+def test_onboarding_step_is_saved_until_done(server):
+    _req(server, "/api/onboarding/step", method="POST", body={"step": 3})
+    _, state = _req(server, "/api/state")
+    assert state["onboarding"] == {"done": False, "step": 3}
+    assert state["default_model"]
+
+    _req(server, "/api/onboarding/done", method="POST", body={})
+    assert server.ctrl.finished
+
+
+def test_dictation_start_reports_the_controller_error(server):
+    _, resp = _req(server, "/api/dictation/start", method="POST", body={})
+    assert resp == {"ok": False, "error": "Model 'large-v3' is not downloaded."}
+
+
+def test_permissions_state_has_every_permission(server):
+    from local_stt import permissions
+
+    _, resp = _req(server, "/api/permissions")
+    assert set(resp) == {"supported", "status", "login_item", "app_bundle"}
+    if resp["supported"]:
+        assert set(resp["status"]) == set(permissions.NAMES)
+    assert resp["app_bundle"] is False  # tests run from source
+
+
+def test_unknown_permission_is_rejected(server):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _req(server, "/api/permissions/request", method="POST", body={"name": "camera"})
+    assert exc.value.code == 400

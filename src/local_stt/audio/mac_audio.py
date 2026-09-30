@@ -1,8 +1,9 @@
 """Meeting tracks on macOS: system audio via a compiled Swift helper (Core
 Audio process tap) and the mic via sounddevice. Both stream to WAV on disk.
 
-The helper is compiled from source on first use and cached by source hash,
-so it needs the Xcode command line tools (xcode-select --install) once.
+The app bundle ships the helper prebuilt (packaging/macos/build.sh). From a
+source install it is compiled on first use and cached by source hash, so it
+needs the Xcode command line tools (xcode-select --install) once.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from ..config import CACHE_DIR
 log = logging.getLogger(__name__)
 
 HELPER_SOURCE = Path(__file__).parent / "macos" / "system_audio_capture.swift"
+BUNDLED_HELPER = HELPER_SOURCE.with_name("system-audio-capture")
 HELPER_DIR = CACHE_DIR / "bin"
 MIC_RATE = 16000
 
@@ -32,6 +34,8 @@ def helper_path() -> Path:
 
 
 def ensure_helper() -> Path:
+    if BUNDLED_HELPER.exists():
+        return BUNDLED_HELPER
     binary = helper_path()
     if binary.exists():
         return binary

@@ -15,7 +15,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from .config import CACHE_DIR, Config, load_config
+from .config import CACHE_DIR, Config, load_config, mark_onboarding_done, onboarding_done
 from .desktop import notify, open_target
 
 log = logging.getLogger(__name__)
@@ -131,6 +131,23 @@ class TrayApp:
     def current_model(self) -> str | None:
         return self.config.model.name if self._daemon is not None else None
 
+    def dictation_state(self) -> str:
+        return self._dictation_state
+
+    def start_dictation(self) -> str | None:
+        """Starts dictation unless it runs already; returns an error message
+        if it failed."""
+        with self._lock:
+            error = None if self._daemon is not None else self._start_daemon_locked()
+        self._refresh()
+        return error
+
+    def finish_onboarding(self) -> None:
+        mark_onboarding_done()
+        if self._ui is not None:
+            self._ui.close_page()
+        threading.Thread(target=self.start_dictation, daemon=True).start()
+
     def apply_config(self, cfg: Config) -> str | None:
         """Adopt validated config; restart the daemon in place if running so
         the new hotkey/mode/output/model take effect without a logout.
@@ -215,7 +232,11 @@ class TrayApp:
 
     def open_settings(self, icon=None, item=None) -> None:
         if self._server is not None and self._server.url:
-            open_target(self._server.url)
+            self._ui.show_page(self._server.url, "local-stt settings")
+
+    def open_onboarding(self, icon=None, item=None) -> None:
+        if self._server is not None and self._server.url:
+            self._ui.show_page(self._server.page_url("onboarding"), "Welcome to local-stt")
 
     def quit(self) -> None:
         if self._server is not None:
@@ -269,6 +290,7 @@ class TrayApp:
             None,
             (lambda: "Open meetings folder", self.open_meetings),
             (lambda: "Settings…", self.open_settings),
+            (lambda: "Setup guide…", self.open_onboarding),
             None,
             (lambda: "Quit", self.quit),
         ]
@@ -300,8 +322,13 @@ class TrayApp:
             log.exception("settings server failed to start")
             self._server = None
 
-        # start dictation by default — the reason the tray exists
-        threading.Thread(target=self.toggle_dictation, daemon=True).start()
+        if sys.platform == "darwin" and not onboarding_done() and self._server is not None:
+            # dictation starts when onboarding finishes, after the model and
+            # permissions are in place
+            self.open_onboarding()
+        else:
+            # start dictation by default: the reason the tray exists
+            threading.Thread(target=self.toggle_dictation, daemon=True).start()
         self._ui.run(on_signal=self.quit)
 
 

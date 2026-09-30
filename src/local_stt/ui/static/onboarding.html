@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to local-stt</title>
+<link rel="stylesheet" href="/static/common.css">
+<style>
+  body { padding-top: 24px; }
+  .dots { display: flex; gap: 6px; margin-bottom: 22px; }
+  .dots span { flex: 1; height: 4px; border-radius: 2px; background: var(--border); }
+  .dots span.done { background: var(--accent2); }
+  .step { display: none; }
+  .step.on { display: block; }
+  h1 { font-size: 24px; margin: 0 0 6px; font-weight: 650; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .perm { display: flex; align-items: center; gap: 14px; padding: 12px 0;
+    border-bottom: 1px solid var(--border); }
+  .perm:last-child { border-bottom: none; padding-bottom: 0; }
+  .perm:first-child { padding-top: 0; }
+  .perm .what { flex: 1; }
+  .perm .what b { font-weight: 600; }
+  .perm .what span { display: block; font-size: 13px; color: var(--muted); }
+  .state { font-size: 12px; width: 78px; text-align: right; color: var(--muted); }
+  .state.granted { color: var(--accent); }
+  .state.denied { color: var(--danger); }
+  .state.not_asked { color: var(--warn); }
+  .rec { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); margin-right: 6px; }
+  .rec.idle { background: var(--accent); }
+  .rec.recording { background: var(--danger); }
+  .rec.transcribing { background: var(--warn); }
+  textarea { min-height: 96px; resize: vertical; }
+  .keys { font-family: ui-monospace, monospace; background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; }
+  .check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .check input { width: 17px; height: 17px; accent-color: var(--accent2); }
+  ul.tips { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  ul.tips li { margin-bottom: 6px; }
+  nav { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
+  nav .msg { flex: 1; }
+  .back { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+  .back:disabled { visibility: hidden; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="dots" id="dots"></div>
+
+  <div class="step" data-step="welcome">
+    <h1>Welcome to local-stt</h1>
+    <p class="lead">Speech to text that runs on this Mac. Nothing you say leaves it.</p>
+    <section>
+      <ul class="tips">
+        <li><b>Dictation.</b> Press a shortcut, speak, press it again. The text appears in the app you're typing in.</li>
+        <li><b>Meetings.</b> Records you and the other side as separate tracks, then writes a transcript.</li>
+        <li><b>Files.</b> Transcribe audio and video files to text or subtitles.</li>
+      </ul>
+    </section>
+    <p class="lead">Setup takes about 5 minutes plus the model download: permissions, a speech model, your shortcut and meetings.</p>
+  </div>
+
+  <div class="step" data-step="permissions">
+    <h1>Permissions</h1>
+    <p class="lead" id="permLead">macOS asks you to allow each of these once.</p>
+    <section id="perms"></section>
+    <p class="hint" id="permHint">Allowed something and it still says missing? Quit local-stt from the menu bar and open it again.</p>
+  </div>
+
+  <div class="step" data-step="model">
+    <h1>Speech model</h1>
+    <p class="lead">The model turns your voice into text. It runs offline once downloaded.</p>
+    <section>
+      <h2>For dictation and meetings</h2>
+      <div class="models" id="mainModels"></div>
+    </section>
+    <section id="langSection">
+      <h2>Other meeting languages (optional)</h2>
+      <div class="models" id="langModels"></div>
+      <div class="hint">Once downloaded, the menu bar shows a "Record meeting in …" item for it.</div>
+    </section>
+  </div>
+
+  <div class="step" data-step="dictation">
+    <h1>Dictation</h1>
+    <p class="lead">Pick your shortcut, then try it below.</p>
+    <section>
+      <div class="row">
+        <label class="name">Shortcut</label>
+        <input type="text" class="hk" id="hotkey" readonly value="…">
+      </div>
+      <div class="hint" id="hkHint">Click the field, then press your shortcut.</div>
+      <div class="row" style="margin-top:12px">
+        <label class="name">Mode</label>
+        <div class="seg" id="mode">
+          <button data-v="toggle">press to start/stop</button><button data-v="hold">hold to talk</button>
+        </div>
+      </div>
+      <div class="row">
+        <label class="name">Output</label>
+        <div class="seg" id="output">
+          <button data-v="type">type it</button><button data-v="clipboard">paste it</button>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2>Try it</h2>
+      <div class="row">
+        <button class="btn" id="startDictation">Save and start dictation</button>
+        <span class="hint" id="dictStatus"><span class="rec"></span>dictation off</span>
+      </div>
+      <textarea id="tryBox" placeholder="Click here, press your shortcut, say a sentence, and press it again."></textarea>
+    </section>
+  </div>
+
+  <div class="step" data-step="meetings">
+    <h1>Meetings</h1>
+    <p class="lead">Start and stop a meeting from the menu bar. The transcript lands in this folder.</p>
+    <section>
+      <div class="row">
+        <label class="name">Folder</label>
+        <input type="text" class="grow" id="output_dir">
+      </div>
+    </section>
+    <section>
+      <ul class="tips">
+        <li>Use headphones. On speakers the other side leaks into your mic and shows up twice.</li>
+        <li>Your voice is "Me", everything the Mac plays is "Them".</li>
+        <li>English transcripts take a few minutes per hour of meeting. Bengali runs on the CPU and takes about 30 minutes per hour of audio.</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="step" data-step="done">
+    <h1>You're set</h1>
+    <p class="lead">local-stt lives in the menu bar: the mic icon at the top right of your screen.</p>
+    <section>
+      <ul class="tips">
+        <li id="doneDictate"></li>
+        <li>Record a meeting: click the mic icon, then <b>Record meeting</b>.</li>
+        <li>Change anything later from the menu: <b>Settings…</b>, or <b>Setup guide…</b> to run this again.</li>
+      </ul>
+    </section>
+    <section id="loginSection">
+      <label class="check"><input type="checkbox" id="loginItem"> Open local-stt when I log in</label>
+      <div class="hint" id="loginHint"></div>
+    </section>
+  </div>
+
+  <div class="step" data-step="finished">
+    <h1>All done</h1>
+    <p class="lead">You can close this window. local-stt is in the menu bar.</p>
+  </div>
+
+  <nav>
+    <button class="back" id="back">Back</button>
+    <span class="msg" id="msg"></span>
+    <button class="primary" id="next">Get started</button>
+  </nav>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+const PERMS = [
+  { name: "microphone", title: "Microphone", why: "Hears you when you dictate and in meetings." },
+  { name: "input_monitoring", title: "Input Monitoring", why: "Notices your shortcut in any app." },
+  { name: "accessibility", title: "Accessibility", why: "Types the text into the app you're using." },
+  { name: "system_audio", title: "System audio", why: "Records the other side of meetings. The test plays a short sound." },
+];
+const STATE_TEXT = { granted: "allowed", denied: "missing", not_asked: "not yet", unknown: "not tested" };
+const DICTATION_TEXT = { off: "dictation off", idle: "listening for your shortcut",
+  recording: "recording…", transcribing: "transcribing…" };
+
+let state = null, perms = null, steps = [], current = 0, timer = null;
+const draft = { model: {}, dictation: {}, meeting: {} };
+
+function flash(text, isErr) {
+  const m = document.getElementById("msg");
+  m.textContent = text; m.className = "msg " + (isErr ? "err" : "ok");
+  if (!isErr) setTimeout(() => { m.textContent = ""; }, 3000);
+}
+
+// -- steps ------------------------------------------------------------------
+
+function show(index) {
+  current = Math.max(0, Math.min(index, steps.length - 1));
+  const name = steps[current];
+  document.querySelectorAll(".step").forEach(el => el.classList.toggle("on", el.dataset.step === name));
+  document.getElementById("dots").innerHTML =
+    steps.map((_, i) => `<span class="${i <= current ? "done" : ""}"></span>`).join("");
+  document.getElementById("back").disabled = current === 0;
+  document.getElementById("next").textContent =
+    name === "welcome" ? "Get started" : name === "done" ? "Finish" : "Continue";
+  document.getElementById("msg").textContent = "";
+  post("/api/onboarding/step", { step: current });
+  clearInterval(timer);
+  if (name === "permissions") { loadPerms(); timer = setInterval(loadPerms, 2000); }
+  if (name === "dictation") { timer = setInterval(refreshDictation, 1000); }
+  if (name === "done") { loadPerms(); }
+  render();
+}
+
+// Saves what the step changed; returns false to stay on the step.
+async function leave(name) {
+  if (name === "model") {
+    const chosen = draft.model.name ?? state.config.model.name;
+    const m = state.models.find(m => m.name === chosen);
+    if (!m || !m.downloaded) { flash("Download a model first. It takes a few minutes.", true); return false; }
+  }
+  if (name === "model" || name === "dictation" || name === "meetings") {
+    if (name === "meetings") draft.meeting.output_dir = document.getElementById("output_dir").value.trim();
+    return await save();
+  }
+  return true;
+}
+
+async function save() {
+  const r = await post("/api/config", draft);
+  const data = await r.json();
+  if (!r.ok) { flash(data.error || "save failed", true); return false; }
+  if (data.reload_error) { flash("Saved, but dictation failed to restart: " + data.reload_error, true); }
+  await load();
+  return true;
+}
+
+document.getElementById("next").onclick = async () => {
+  const btn = document.getElementById("next");
+  btn.disabled = true;
+  try {
+    if (!(await leave(steps[current]))) return;
+    if (steps[current] === "done") {
+      await post("/api/onboarding/done");
+      clearInterval(timer);
+      document.querySelectorAll(".step").forEach(el => el.classList.toggle("on", el.dataset.step === "finished"));
+      document.querySelector("nav").style.display = "none";
+      return;
+    }
+    show(current + 1);
+  } catch (e) { flash(String(e), true); }
+  finally { btn.disabled = false; }
+};
+document.getElementById("back").onclick = () => show(current - 1);
+
+// -- rendering --------------------------------------------------------------
+
+function render() {
+  if (!state) return;
+  const c = state.config;
+  const singleLanguage = m => m.languages !== "English" && !m.languages.includes(" languages");
+  const chosen = draft.model.name ?? c.model.name;
+  renderModels(document.getElementById("mainModels"), state, {
+    chosen, noRemove: true, flash, onChanged: poll,
+    filter: m => !m.unavailable && !singleLanguage(m) && (m.family === "parakeet" || m.name === "large-v3-turbo" || m.name === chosen),
+    note: m => m.name === state.default_model ? "recommended" : "",
+    onChoose: m => { draft.model.name = m.name; render(); },
+  });
+  const langEl = document.getElementById("langModels");
+  renderModels(langEl, state, {
+    chosen: null, noRemove: true, flash, onChanged: poll,
+    filter: m => !m.unavailable && singleLanguage(m),
+    onChoose: () => flash("This one is for meetings only. Use Record meeting in … from the menu bar.", false),
+  });
+  document.getElementById("langSection").style.display = langEl.children.length ? "" : "none";
+  setHotkey(draft.dictation.hotkey ?? c.dictation.hotkey);
+  setSeg("mode", draft.dictation.mode ?? c.dictation.mode);
+  setSeg("output", draft.dictation.output ?? c.dictation.output);
+  const hk = document.getElementById("hotkey").value;
+  const hold = (draft.dictation.mode ?? c.dictation.mode) === "hold";
+  document.getElementById("doneDictate").innerHTML = hold
+    ? `Dictate: hold <span class="keys">${escapeHtml(hk)}</span> while you speak.`
+    : `Dictate: press <span class="keys">${escapeHtml(hk)}</span>, speak, press it again.`;
+  document.getElementById("tryBox").placeholder = hold
+    ? `Click here, then hold ${hk} while you say a sentence.`
+    : `Click here, press ${hk}, say a sentence, and press ${hk} again.`;
+  if (!document.getElementById("output_dir").value) {
+    document.getElementById("output_dir").value = draft.meeting.output_dir ?? c.meeting.output_dir;
+  }
+  renderDictation();
+}
+
+function renderDictation() {
+  const s = state.daemon_running ? state.dictation_state : "off";
+  document.getElementById("dictStatus").innerHTML =
+    `<span class="rec ${s}"></span>${DICTATION_TEXT[s] ?? s}`;
+  document.getElementById("startDictation").textContent =
+    state.daemon_running ? "Save and restart dictation" : "Save and start dictation";
+}
+
+function renderPerms() {
+  const el = document.getElementById("perms");
+  el.innerHTML = "";
+  for (const p of PERMS) {
+    const s = perms.status[p.name];
+    const row = document.createElement("div");
+    row.className = "perm";
+    const label = p.name === "system_audio" ? (s === "granted" ? "Test again" : "Test")
+      : s === "granted" ? "" : s === "denied" ? "Open Settings" : "Allow";
+    row.innerHTML = `<div class="what"><b>${p.title}</b><span>${p.why}</span></div>` +
+      `<span class="state ${s}">${STATE_TEXT[s]}</span>` +
+      (label ? `<button class="btn">${label}</button>` : "");
+    const btn = row.querySelector("button");
+    if (btn) btn.onclick = async () => {
+      btn.disabled = true;
+      if (p.name === "system_audio") btn.textContent = "listening…";
+      const r = await post("/api/permissions/request", { name: p.name });
+      perms = await r.json();
+      renderPerms();
+      if (p.name === "system_audio" && perms.status.system_audio !== "granted") {
+        flash("Heard nothing. Allow local-stt under System Audio Recording Only, then test again.", true);
+      }
+    };
+    el.appendChild(row);
+  }
+  document.getElementById("permLead").textContent = perms.app_bundle
+    ? "macOS asks you to allow each of these once."
+    : "macOS asks you to allow each of these once. They go to the app you run stt from, such as your terminal.";
+  const login = perms.login_item;
+  document.getElementById("loginSection").style.display = login.supported ? "" : "none";
+  document.getElementById("loginItem").checked = login.enabled;
+  document.getElementById("loginHint").textContent = login.needs_approval
+    ? "Waiting for approval in System Settings > General > Login Items." : "";
+}
+
+// -- data -------------------------------------------------------------------
+
+async function load() {
+  const r = await api("/api/state");
+  state = await r.json();
+  render();
+}
+async function poll() {
+  await load();
+  if (Object.values(state.downloading).some(s => s === "running")) setTimeout(poll, 1000);
+}
+async function loadPerms() {
+  const r = await api("/api/permissions");
+  perms = await r.json();
+  renderPerms();
+}
+async function refreshDictation() {
+  const r = await api("/api/state");
+  const fresh = await r.json();
+  state.daemon_running = fresh.daemon_running;
+  state.dictation_state = fresh.dictation_state;
+  renderDictation();
+}
+
+bindSeg("mode", v => { draft.dictation.mode = v; render(); });
+bindSeg("output", v => { draft.dictation.output = v; });
+const setHotkey = hotkeyCapture(
+  document.getElementById("hotkey"), document.getElementById("hkHint"),
+  raw => { draft.dictation.hotkey = raw; render(); },
+);
+
+document.getElementById("startDictation").onclick = async () => {
+  if (!(await save())) return;
+  const r = await post("/api/dictation/start");
+  const data = await r.json();
+  if (data.error) return flash(data.error, true);
+  await refreshDictation();
+  document.getElementById("tryBox").focus();
+};
+
+document.getElementById("loginItem").onchange = async (e) => {
+  const r = await post("/api/login-item", { enabled: e.target.checked });
+  const data = await r.json();
+  if (!r.ok) { flash(data.error, true); e.target.checked = !e.target.checked; return; }
+  perms = data;
+  renderPerms();
+};
+
+(async () => {
+  await load();
+  await loadPerms();
+  steps = ["welcome", ...(perms.supported ? ["permissions"] : []), "model", "dictation", "meetings", "done"];
+  show(state.onboarding.step || 0);
+  if (Object.values(state.downloading).some(s => s === "running")) poll();
+})();
+</script>
+</body>
+</html>

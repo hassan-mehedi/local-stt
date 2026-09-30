@@ -5,6 +5,7 @@ __pycache__/
 .eggs/
 build/
 dist/
+.briefcase/
 
 # uv / virtualenv
 .venv/
@@ -20,3 +21,6 @@ dist/
 # Stray runtime artifacts (recordings/transcripts live under ~/Documents and
 # ~/.cache, not the project tree)
 *.tmp
+
+# built by packaging/macos/build.sh
+src/local_stt/audio/macos/system-audio-capture

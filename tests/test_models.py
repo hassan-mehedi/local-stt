@@ -46,3 +46,16 @@ def test_parakeet_is_unavailable_off_apple_silicon(monkeypatch):
     assert models.unavailable_reason("large-v3-turbo") is None
     with pytest.raises(RuntimeError):
         models.download("parakeet-tdt-0.6b-v3")
+
+
+def test_download_progress_compares_bytes_on_disk_to_the_model_size(models_dir):
+    d = models.model_dir("tiny")
+    assert models.download_progress("tiny") == 0
+    (d / ".cache").mkdir(parents=True)
+    (d / ".cache" / "model.bin.incomplete").write_bytes(b"x" * 15_000_000)
+    size = models.spec("tiny").size_mb * 1_000_000
+    assert models.download_progress("tiny") == pytest.approx(15_000_000 / size)
+
+
+def test_download_progress_is_unknown_while_converting(models_dir):
+    assert models.download_progress("bengali-whisper-medium") is None

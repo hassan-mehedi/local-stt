@@ -1,3 +1,5 @@
+import time
+
 from local_stt.engine.backend import Segment, Transcript
 from local_stt.meeting.recorder import slugify
 from local_stt.meeting.transcribe import label, merge
@@ -107,3 +109,28 @@ def test_tray_offers_a_meeting_per_downloaded_language_model(downloaded):
     labels = [row[0]() for row in app.menu() if row is not None]
     assert "■ Stop & transcribe meeting" in labels
     assert None in labels
+
+
+def test_finishing_onboarding_closes_the_window_and_starts_dictation(tmp_path, monkeypatch):
+    import local_stt.config as cfgmod
+    from local_stt.tray import TrayApp
+
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", tmp_path / "config.toml")
+    app = TrayApp(_cfg())
+    closed, started = [], []
+
+    class Shell:
+        def close_page(self):
+            closed.append(True)
+
+    app._ui = Shell()
+    monkeypatch.setattr(app, "start_dictation", lambda: started.append(True))
+    app.finish_onboarding()
+    assert cfgmod.onboarding_done()
+    assert closed
+    for _ in range(50):
+        if started:
+            break
+        time.sleep(0.01)
+    assert started
+    assert "Setup guide…" in [row[0]() for row in app.menu() if row is not None]

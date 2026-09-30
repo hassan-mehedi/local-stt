@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import platform
 import sys
 import tomllib
@@ -61,6 +62,30 @@ class Config:
     dictation: DictationConfig = field(default_factory=DictationConfig)
     meeting: MeetingConfig = field(default_factory=MeetingConfig)
     diarize: DiarizeConfig = field(default_factory=DiarizeConfig)
+
+
+def load_onboarding() -> dict:
+    """{"done": bool, "step": int}. The step survives the relaunch macOS
+    asks for after granting Input Monitoring."""
+    try:
+        data = json.loads((CONFIG_PATH.parent / "onboarding.json").read_text())
+    except (OSError, ValueError):
+        data = {}
+    return {"done": bool(data.get("done")), "step": int(data.get("step", 0))}
+
+
+def save_onboarding(**changes) -> None:
+    path = CONFIG_PATH.parent / "onboarding.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({**load_onboarding(), **changes}))
+
+
+def onboarding_done() -> bool:
+    return load_onboarding()["done"]
+
+
+def mark_onboarding_done() -> None:
+    save_onboarding(done=True, step=0)
 
 
 def _section(cls, data: dict):
