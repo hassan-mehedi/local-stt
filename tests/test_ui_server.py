@@ -11,6 +11,7 @@ class FakeController(Controller):
     def __init__(self):
         self.applied = None
         self.running = True
+        self.reload_error = None
 
     def daemon_running(self):
         return self.running
@@ -20,6 +21,9 @@ class FakeController(Controller):
 
     def apply_config(self, cfg):
         self.applied = cfg
+        if self.reload_error:
+            self.running = False
+        return self.reload_error
 
 
 @pytest.fixture
@@ -84,6 +88,27 @@ def test_post_invalid_config_returns_400(server):
              body={"model": {"name": "bogus-model"}})
     assert exc.value.code == 400
     assert server.ctrl.applied is None  # not applied on validation failure
+
+
+
+def test_post_config_reports_reload_failure(server):
+    server.ctrl.reload_error = "Model 'medium' is not downloaded."
+    status, resp = _req(
+        server, "/api/config", method="POST", body={"dictation": {"mode": "hold"}}
+    )
+    assert status == 200
+    assert resp["reload_error"] == "Model 'medium' is not downloaded."
+    assert resp["daemon_running"] is False
+
+
+@pytest.mark.parametrize("endpoint", ["/api/models/remove", "/api/models/download"])
+def test_model_endpoints_reject_unknown_names(server, endpoint, tmp_path):
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _req(server, endpoint, method="POST", body={"name": str(victim)})
+    assert exc.value.code == 400
+    assert victim.exists()
 
 
 import urllib.error  # noqa: E402  (used in tests above)

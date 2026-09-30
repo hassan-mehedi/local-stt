@@ -16,12 +16,13 @@ from ..engine.backend import Segment
 
 log = logging.getLogger(__name__)
 
+PIPELINE = "pyannote/speaker-diarization-community-1"
+
 GATED_MODELS_HELP = (
     "Diarization needs a HuggingFace token with access to the gated pyannote "
     "models.\n"
     "  1. Accept the conditions at:\n"
-    "       https://huggingface.co/pyannote/speaker-diarization-3.1\n"
-    "       https://huggingface.co/pyannote/segmentation-3.0\n"
+    "       https://huggingface.co/pyannote/speaker-diarization-community-1\n"
     "  2. Create a token at https://huggingface.co/settings/tokens\n"
     "  3. Put it in ~/.config/local-stt/config.toml:\n"
     "       [diarize]\n"
@@ -49,9 +50,7 @@ def diarize_wav(path: Path, hf_token: str | None = None) -> list[Turn]:
 
     token = hf_token or os.environ.get("HF_TOKEN") or None
     try:
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1", use_auth_token=token
-        )
+        pipeline = Pipeline.from_pretrained(PIPELINE, token=token)
     except Exception as e:
         raise RuntimeError(f"Could not load pyannote pipeline: {e}\n\n{GATED_MODELS_HELP}") from e
     if pipeline is None:
@@ -65,7 +64,12 @@ def diarize_wav(path: Path, hf_token: str | None = None) -> list[Turn]:
     except Exception:
         log.warning("could not move diarization to GPU; using CPU")
 
-    annotation = pipeline(str(path))
+    output = pipeline(str(path))
+    # exclusive diarization allows one speaker at a time, which maps cleanly
+    # onto transcript segments
+    annotation = getattr(output, "exclusive_speaker_diarization", None)
+    if annotation is None:
+        annotation = getattr(output, "speaker_diarization", output)
     return [
         Turn(start=turn.start, end=turn.end, label=label)
         for turn, _, label in annotation.itertracks(yield_label=True)

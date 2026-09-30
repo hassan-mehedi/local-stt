@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 import re
 import signal
+import sys
 from datetime import datetime
 from pathlib import Path
 
-from ..audio.system_audio import PwRecorder
 from ..config import CACHE_DIR
 
 PIDFILE = CACHE_DIR / "meeting.pid"
@@ -19,8 +19,18 @@ def slugify(name: str) -> str:
     return slug or "meeting"
 
 
+def _track_recorders(mic_path: Path, system_path: Path):
+    if sys.platform == "darwin":
+        from ..audio.mac_audio import MacSystemAudioRecorder, MicWavRecorder
+
+        return MicWavRecorder(mic_path), MacSystemAudioRecorder(system_path)
+    from ..audio.system_audio import PwRecorder
+
+    return PwRecorder(mic_path, capture_sink=False), PwRecorder(system_path, capture_sink=True)
+
+
 class MeetingRecorder:
-    """Records mic ('Me') and sink monitor ('Them') into a session directory.
+    """Records mic ('Me') and system audio ('Them') into a session directory.
 
     Layout: <output_dir>/<YYYY-MM-DD>-<title>/raw/{mic,system}.wav
     Both tracks stream to disk while recording — nothing is held in RAM.
@@ -28,6 +38,9 @@ class MeetingRecorder:
 
     def __init__(self, output_dir: Path, title: str, when: datetime):
         self.title = title
+        # what to transcribe with; the tray sets these before start()
+        self.model: str | None = None
+        self.language = ""
         self.session_dir = output_dir / f"{when:%Y-%m-%d}-{slugify(title)}"
         n = 2
         while self.session_dir.exists():  # don't clobber an earlier session
@@ -36,16 +49,17 @@ class MeetingRecorder:
         raw = self.session_dir / "raw"
         self.mic_path = raw / "mic.wav"
         self.system_path = raw / "system.wav"
-        self._mic = PwRecorder(self.mic_path, capture_sink=False)
-        self._system = PwRecorder(self.system_path, capture_sink=True)
+        self._mic, self._system = _track_recorders(self.mic_path, self.system_path)
 
     def start(self) -> None:
+        # system first: the macOS helper blocks until its audio flows, so the
+        # mic then starts at the same moment and the tracks line up
         self.mic_path.parent.mkdir(parents=True, exist_ok=True)
-        self._mic.start()
+        self._system.start()
         try:
-            self._system.start()
+            self._mic.start()
         except Exception:
-            self._mic.stop()
+            self._system.stop()
             raise
         PIDFILE.parent.mkdir(parents=True, exist_ok=True)
         PIDFILE.write_text(str(os.getpid()))

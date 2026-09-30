@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -13,6 +15,22 @@ from . import models
 from .backend import AsrBackend, Segment, Transcript, TranscribeOptions, Word
 
 log = logging.getLogger(__name__)
+
+
+def _cpu_threads() -> int:
+    """On Apple Silicon use the performance cores: 8 threads on an M4 Pro
+    ran a Bengali clip in 4.1s against 5.7s with CTranslate2's default.
+    0 keeps the library default elsewhere."""
+    if sys.platform != "darwin":
+        return 0
+    try:
+        out = subprocess.run(
+            ["sysctl", "-n", "hw.perflevel0.physicalcpu"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        return int(out.strip())
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return 0
 
 
 class FasterWhisperBackend(AsrBackend):
@@ -59,6 +77,7 @@ class FasterWhisperBackend(AsrBackend):
                 str(models.model_dir(self.model_name)),
                 device=device,
                 compute_type=compute_type,
+                cpu_threads=_cpu_threads(),
             )
         except (RuntimeError, ValueError) as e:
             if device != "cuda":
@@ -69,6 +88,7 @@ class FasterWhisperBackend(AsrBackend):
                 str(models.model_dir(self.model_name)),
                 device=device,
                 compute_type=compute_type,
+                cpu_threads=_cpu_threads(),
             )
         log.info(
             "Loaded %s on %s (%s) in %.1fs",

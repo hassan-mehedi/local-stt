@@ -1,6 +1,7 @@
 """Hotkey listener backends.
 
-PynputListener — X11 (no special permissions).
+PynputListener — X11 (no special permissions) and macOS (needs Input
+                 Monitoring permission).
 EvdevListener  — Wayland (reads /dev/input directly; user must be in the
                  'input' group and the [wayland] extra installed).
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 
 from .hotkey import Hotkey
@@ -27,6 +29,11 @@ class PynputListener:
         self._pressed_mods: set[str] = set()
         self._trigger_down = False  # edge detection: X auto-repeat resends presses
         self._listener = None
+        self._trigger_vks: frozenset[int] = frozenset()
+        # macOS: key codes of the trigger, and whether the current press
+        # fired the hotkey (its key events are then kept from the focused app)
+        self._intercept_vks: frozenset[int] = frozenset()
+        self._swallowing = False
 
     @staticmethod
     def _mod_name(key) -> str | None:
@@ -43,6 +50,8 @@ class PynputListener:
     def _is_trigger(self, key) -> bool:
         from pynput.keyboard import Key, KeyCode
 
+        if self._trigger_vks and isinstance(key, KeyCode):
+            return key.vk in self._trigger_vks  # canonical() drops the vk
         key = self._listener.canonical(key)
         trigger = self.hotkey.trigger
         if isinstance(key, KeyCode):
@@ -66,6 +75,7 @@ class PynputListener:
                 return  # auto-repeat
             self._trigger_down = True
             if self.hotkey.modifiers <= self._pressed_mods:
+                self._swallowing = bool(self._intercept_vks)
                 self.on_activate()
 
     def _on_release(self, key):
@@ -80,10 +90,42 @@ class PynputListener:
     def start(self) -> None:
         from pynput import keyboard
 
+        extra = {}
+        if sys.platform == "darwin":
+            _require_input_monitoring()
+            trigger = self.hotkey.trigger
+            if len(trigger) == 1:
+                # Option changes the character a key types (Option+T is "†"),
+                # so match the physical key instead
+                self._trigger_vks = mac_keycodes(trigger)
+                if not self._trigger_vks:
+                    raise ValueError(
+                        f"No key types {trigger!r} on the current keyboard layout"
+                    )
+                self._intercept_vks = self._trigger_vks
+            elif trigger in keyboard.Key.__members__:
+                self._intercept_vks = frozenset({keyboard.Key[trigger].value.vk})
+            extra["darwin_intercept"] = self._darwin_intercept
         self._listener = keyboard.Listener(
-            on_press=self._on_press, on_release=self._on_release
+            on_press=self._on_press, on_release=self._on_release, **extra
         )
         self._listener.start()
+
+    def _darwin_intercept(self, event_type, event):
+        """Runs after the press/release callbacks. Returning None drops the
+        event, so Option+Shift+T doesn't also type "ˇ" into the focused app."""
+        import Quartz
+
+        if not self._swallowing or event_type not in (
+            Quartz.kCGEventKeyDown, Quartz.kCGEventKeyUp
+        ):
+            return event
+        vk = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+        if vk not in self._intercept_vks:
+            return event
+        if event_type == Quartz.kCGEventKeyUp:
+            self._swallowing = False
+        return None
 
     def stop(self) -> None:
         if self._listener is not None:
@@ -93,6 +135,31 @@ class PynputListener:
     def join(self) -> None:
         if self._listener is not None:
             self._listener.join()
+
+
+def mac_keycodes(char: str) -> frozenset[int]:
+    """Key codes that type `char` with no modifiers held (main row and keypad
+    both type digits)."""
+    from pynput._util.darwin import keycode_context, keycode_to_string
+
+    with keycode_context() as context:
+        return frozenset(
+            code for code in range(128) if keycode_to_string(context, code) == char
+        )
+
+
+def _require_input_monitoring() -> None:
+    import Quartz
+
+    if Quartz.CGPreflightListenEventAccess():
+        return
+    Quartz.CGRequestListenEventAccess()  # shows the system prompt once
+    raise RuntimeError(
+        "macOS blocks reading the hotkey. Allow it in System Settings > Privacy "
+        "& Security > Input Monitoring (the terminal you run stt from, or "
+        f"{os.path.realpath(sys.executable)} when it runs as a login agent), "
+        "then restart."
+    )
 
 
 class EvdevListener:
@@ -128,7 +195,8 @@ class EvdevListener:
         from evdev import ecodes
 
         name = f"KEY_{trigger.upper()}"
-        code = getattr(ecodes, name, None)
+        # pynput names (page_up) drop the underscore in evdev (KEY_PAGEUP)
+        code = getattr(ecodes, name, None) or getattr(ecodes, name.replace("_", ""), None)
         if code is None:
             raise ValueError(f"Unknown trigger key for evdev: {trigger!r} ({name})")
         return code

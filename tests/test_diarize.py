@@ -1,5 +1,9 @@
+import sys
+import types
+from types import SimpleNamespace
+
 from local_stt.engine.backend import Segment
-from local_stt.meeting.diarize import Turn, assign_speakers
+from local_stt.meeting.diarize import PIPELINE, Turn, assign_speakers, diarize_wav
 
 
 def _segs():
@@ -44,3 +48,40 @@ def test_segment_outside_turns_unchanged():
     turns = [Turn(0.0, 4.0, "SPEAKER_00"), Turn(5.0, 9.0, "SPEAKER_01")]
     out = assign_speakers(_segs(), turns)
     assert out[2].speaker == "Them"  # 10-14s has no overlap
+
+
+class FakeAnnotation:
+    def __init__(self, tracks):
+        self.tracks = tracks
+
+    def itertracks(self, yield_label):
+        for start, end, label in self.tracks:
+            yield SimpleNamespace(start=start, end=end), None, label
+
+
+def test_diarize_wav_uses_pyannote_4_api(monkeypatch, tmp_path):
+    calls = {}
+    regular = FakeAnnotation([(0.0, 5.0, "SPEAKER_00"), (4.0, 9.0, "SPEAKER_01")])
+    exclusive = FakeAnnotation([(0.0, 4.5, "SPEAKER_00"), (4.5, 9.0, "SPEAKER_01")])
+
+    class FakePipeline:
+        @classmethod
+        def from_pretrained(cls, checkpoint, token=None):
+            calls["checkpoint"], calls["token"] = checkpoint, token
+            return cls()
+
+        def __call__(self, path):
+            return SimpleNamespace(
+                speaker_diarization=regular, exclusive_speaker_diarization=exclusive
+            )
+
+    audio = types.ModuleType("pyannote.audio")
+    audio.Pipeline = FakePipeline
+    monkeypatch.setitem(sys.modules, "pyannote", types.ModuleType("pyannote"))
+    monkeypatch.setitem(sys.modules, "pyannote.audio", audio)
+    monkeypatch.setitem(sys.modules, "torch", None)  # skip the GPU move
+
+    turns = diarize_wav(tmp_path / "system.wav", hf_token="hf_test")
+
+    assert calls == {"checkpoint": PIPELINE, "token": "hf_test"}
+    assert turns == [Turn(0.0, 4.5, "SPEAKER_00"), Turn(4.5, 9.0, "SPEAKER_01")]

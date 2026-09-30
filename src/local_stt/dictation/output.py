@@ -2,14 +2,17 @@
 
 X11:     xdotool type / xclip + Ctrl+V
 Wayland: wtype (or ydotool) / wl-copy + paste keystroke
-The right backend is picked per session type at startup.
+macOS:   synthetic key events (pynput) / pbcopy + Cmd+V
+The right backend is picked per platform and session type at startup.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
+import sys
 from abc import ABC, abstractmethod
 
 from .listeners import is_wayland
@@ -107,10 +110,66 @@ class WaylandClipboardOutput(TextOutput):
             subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], check=True)
 
 
+# -- macOS ------------------------------------------------------------------------------
+
+
+def _require_accessibility() -> None:
+    import HIServices
+
+    # shows the system prompt the first time
+    if not HIServices.AXIsProcessTrustedWithOptions(
+        {HIServices.kAXTrustedCheckOptionPrompt: True}
+    ):
+        raise RuntimeError(
+            "macOS blocks synthetic key presses from this app. Allow it in System "
+            "Settings > Privacy & Security > Accessibility (add the terminal you "
+            f"run stt from, or {os.path.realpath(sys.executable)} when it runs as "
+            "a login agent), then restart."
+        )
+
+
+class MacTypeOutput(TextOutput):
+    """Key events carry the text itself, so any keyboard layout works.
+    pynput sets modifier flags explicitly, so a still-held hotkey
+    modifier doesn't turn 'a' into 'å'."""
+
+    def __init__(self):
+        from pynput.keyboard import Controller
+
+        _require_accessibility()
+        self._keyboard = Controller()
+
+    def emit(self, text: str) -> None:
+        self._keyboard.type(text)
+
+
+class MacClipboardOutput(TextOutput):
+    """pbcopy + Cmd+V. Faster for long text; clobbers the clipboard."""
+
+    def __init__(self):
+        from pynput.keyboard import Controller
+
+        _require_accessibility()
+        self._keyboard = Controller()
+
+    def emit(self, text: str) -> None:
+        from pynput.keyboard import Key
+
+        subprocess.run(["pbcopy"], input=text.encode(), check=True)
+        with self._keyboard.pressed(Key.cmd):
+            self._keyboard.tap("v")
+
+
 # -- factory --------------------------------------------------------------------------
 
 
 def make_output(mode: str) -> TextOutput:
+    if sys.platform == "darwin":
+        if mode == "type":
+            return MacTypeOutput()
+        if mode == "clipboard":
+            return MacClipboardOutput()
+        raise ValueError(f"Unknown output mode: {mode!r} (expected 'type' or 'clipboard')")
     wayland = is_wayland()
     if mode == "type":
         if not wayland:

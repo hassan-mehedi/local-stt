@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import logging
 import queue
-import shutil
-import subprocess
 import threading
 import time
 
@@ -17,6 +15,7 @@ import numpy as np
 
 from ..audio.capture import Recorder
 from ..config import Config
+from ..desktop import notify
 from ..engine.backend import AsrBackend, TranscribeOptions
 from .hotkey import Hotkey, parse_hotkey
 from .listeners import make_listener
@@ -27,12 +26,7 @@ log = logging.getLogger(__name__)
 
 
 def _notify(summary: str, body: str = "") -> None:
-    if shutil.which("notify-send"):
-        subprocess.Popen(
-            ["notify-send", "-a", "local-stt", "-t", "1200", summary, body],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    notify(summary, body, timeout_ms=1200)
 
 
 class DictationDaemon:

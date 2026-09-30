@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS login agent for the menu bar app. launchd does not expand ~ or
+     $HOME, so install with the sed command in the README, which fills in
+     __HOME__. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local-stt</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/stt</string>
+        <string>tray</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- restart after a crash, but not after Quit from the menu -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/local-stt.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/local-stt.log</string>
+</dict>
+</plist>

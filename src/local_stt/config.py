@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+import sys
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -11,9 +13,17 @@ CACHE_DIR = Path.home() / ".cache" / "local-stt"
 MODELS_DIR = CACHE_DIR / "models"
 
 
+def default_model() -> str:
+    # Parakeet v2 is English-only with the lowest WER here, and runs on the
+    # Apple GPU; Whisper has no GPU path on a Mac
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        return "parakeet-tdt-0.6b-v2"
+    return "large-v3-turbo"
+
+
 @dataclass
 class ModelConfig:
-    name: str = "large-v3-turbo"
+    name: str = field(default_factory=default_model)
     compute_type: str = "float16"  # fall back to int8_float16 if latency poor
     device: str = "auto"  # "auto" | "cuda" | "cpu"
     language: str = "en"  # empty string = auto-detect
@@ -36,6 +46,8 @@ class DictationConfig:
 @dataclass
 class MeetingConfig:
     output_dir: str = "~/Documents/meetings"
+    model: str = ""  # blank = the dictation model
+    language: str = ""  # blank = the dictation language
 
 
 @dataclass
@@ -93,10 +105,10 @@ def validate(cfg: Config) -> Config:
     from .dictation.hotkey import parse_hotkey
     from .engine import models
 
-    if cfg.model.name not in models.KNOWN_MODELS:
-        raise ConfigError(
-            f"Unknown model {cfg.model.name!r}. "
-            f"Choose one of: {', '.join(models.KNOWN_MODELS)}"
+    _validate_model(cfg.model.name, cfg.model.language, "[model]")
+    if cfg.meeting.model:
+        _validate_model(
+            cfg.meeting.model, cfg.meeting.language or cfg.model.language, "[meeting]"
         )
     for (section, key), allowed in ENUMS.items():
         value = getattr(getattr(cfg, section), key)
@@ -114,6 +126,22 @@ def validate(cfg: Config) -> Config:
     if cfg.dictation.max_duration_ms < 0:
         raise ConfigError("max_duration_ms must be >= 0 (0 disables the cap)")
     return cfg
+
+
+def _validate_model(name: str, language: str, section: str) -> None:
+    from .engine import models
+
+    try:
+        spec = models.spec(name)
+    except ValueError as e:
+        raise ConfigError(f"{section} {e}") from e
+    if reason := models.unavailable_reason(spec.name):
+        raise ConfigError(f"{section} {spec.name}: {reason}")
+    if language and spec.languages and language not in spec.languages:
+        raise ConfigError(
+            f"{section} {spec.name} does not support language {language!r}; "
+            f"supported: {', '.join(sorted(spec.languages))} (or blank for auto-detect)"
+        )
 
 
 def _as_tables(cfg: Config) -> dict:

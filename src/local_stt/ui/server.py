@@ -16,20 +16,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from ..config import Config, ConfigError, load_config, save_config
+from ..config import Config, load_config, save_config
 from ..engine import models
 from .state import clear_state, write_state
 
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
-
-# approximate on-disk sizes for the model list (MB), display-only
-MODEL_SIZES_MB = {
-    "tiny": 75, "base": 145, "small": 484, "medium": 1530,
-    "distil-large-v3": 1510, "large-v3": 3090, "large-v3-turbo": 1620,
-}
-
 
 class Controller:
     """Interface the tray implements for live actions. The default no-op
@@ -38,8 +31,10 @@ class Controller:
     def daemon_running(self) -> bool:
         return False
 
-    def apply_config(self, cfg: Config) -> None:
-        """Called after a validated save so the daemon can reload in place."""
+    def apply_config(self, cfg: Config) -> str | None:
+        """Called after a validated save so the daemon can reload in place.
+        Returns an error message if the reload failed."""
+        return None
 
     def current_model(self) -> str | None:
         return None
@@ -50,12 +45,15 @@ def build_state(controller: Controller) -> dict:
     loaded = controller.current_model()
     model_list = [
         {
-            "name": name,
-            "downloaded": models.is_downloaded(name),
-            "loaded": name == loaded,
-            "size_mb": MODEL_SIZES_MB.get(name),
+            "name": spec.name,
+            "family": spec.family,
+            "languages": spec.languages_label,
+            "downloaded": models.is_downloaded(spec.name),
+            "loaded": spec.name == loaded,
+            "size_mb": spec.size_mb,
+            "unavailable": models.unavailable_reason(spec.name),
         }
-        for name in models.KNOWN_MODELS
+        for spec in models.MODELS.values()
     ]
     return {
         "config": asdict(cfg),
@@ -102,6 +100,7 @@ class _Downloads:
             return dict(self._state)
 
     def start(self, name: str) -> None:
+        models.model_dir(name)  # rejects unknown names before a thread starts
         with self._lock:
             if self._state.get(name) == "running":
                 return
@@ -173,7 +172,7 @@ def make_handler(token: str, controller: Controller):
                 if path == "/api/models/remove":
                     models.remove(self._read_json()["name"])
                     return self._send_json({"ok": True})
-            except ConfigError as e:
+            except ValueError as e:  # ConfigError, unknown model, bad JSON
                 return self._send_json({"error": str(e)}, 400)
             except Exception as e:
                 log.exception("API error")
@@ -183,8 +182,13 @@ def make_handler(token: str, controller: Controller):
         def _save_config(self):
             cfg = _config_from_payload(self._read_json())
             save_config(cfg)  # validates, then writes (atomic)
-            controller.apply_config(cfg)  # live-reload the daemon
-            return self._send_json({"ok": True, "config": asdict(cfg)})
+            reload_error = controller.apply_config(cfg)  # live-reload the daemon
+            return self._send_json({
+                "ok": True,
+                "config": asdict(cfg),
+                "daemon_running": controller.daemon_running(),
+                "reload_error": reload_error,
+            })
 
         def _serve_page(self):
             html = (STATIC_DIR / "settings.html").read_bytes()

@@ -1,45 +1,36 @@
-"""System tray app (GTK AppIndicator): dictation toggle, meeting record,
-settings, and a status icon.
+"""Tray / menu bar app: dictation toggle, meeting record, settings, and a
+status icon. The app logic lives here; the platform UI is a shell from
+ui.tray_gtk (Linux) or ui.tray_mac (macOS).
 
-Icon state: dimmed mic = dictation off, green dot = listening, red dot =
-recording (dictation utterance or meeting), amber dot = transcribing.
-
-Uses Ayatana AppIndicator via the system PyGObject (the isolated uv venv has
-no `gi`, but the system one is ABI-compatible — we append dist-packages to
-sys.path so it's importable without shadowing venv packages).
+Icon states: off, idle (listening), recording (dictation utterance or
+meeting), transcribing.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import shutil
-import subprocess
 import sys
 import threading
 from datetime import datetime
 from pathlib import Path
 
 from .config import CACHE_DIR, Config, load_config
+from .desktop import notify, open_target
 
 log = logging.getLogger(__name__)
 
 PIDFILE = CACHE_DIR / "tray.pid"
-_SYSTEM_SITE = "/usr/lib/python3/dist-packages"
 
 
-def _load_gi():
-    """Make the system PyGObject importable from the venv. Appended (not
-    prepended) so venv packages keep priority over system ones."""
-    if _SYSTEM_SITE not in sys.path and os.path.isdir(_SYSTEM_SITE):
-        sys.path.append(_SYSTEM_SITE)
-    import gi
+def _make_shell():
+    if sys.platform == "darwin":
+        from .ui.tray_mac import MacShell
 
-    gi.require_version("Gtk", "3.0")
-    gi.require_version("AyatanaAppIndicator3", "0.1")
-    from gi.repository import AyatanaAppIndicator3, GLib, Gtk
+        return MacShell()
+    from .ui.tray_gtk import GtkShell
 
-    return Gtk, GLib, AyatanaAppIndicator3
+    return GtkShell()
 
 
 def _single_instance() -> bool:
@@ -57,21 +48,13 @@ def _single_instance() -> bool:
 
 
 def _notify(summary: str, body: str = "") -> None:
-    if shutil.which("notify-send"):
-        subprocess.Popen(
-            ["notify-send", "-a", "local-stt", "-t", "2500", summary, body],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    notify(summary, body, timeout_ms=2500)
 
 
 class TrayApp:
     def __init__(self, config: Config):
         self.config = config
-        self.indicator = None
-        self._gtk = None
-        self._glib = None
-        self._menu_items = {}
+        self._ui = None
         self._daemon = None
         self._meeting = None
         self._server = None
@@ -85,23 +68,24 @@ class TrayApp:
         if self._meeting is not None and state == "idle":
             state = "recording"
         self._dictation_state = state
-        if self.indicator is None:
-            return
-        from .ui.icons import icon_name
+        if self._ui is not None:
+            self._ui.set_state(state)
 
-        # GTK is not thread-safe; marshal the icon change onto the main loop
-        self._glib.idle_add(self.indicator.set_icon_full, icon_name(state), state)
+    def _refresh(self) -> None:
+        if self._ui is not None:
+            self._ui.refresh()
 
     def _on_dictation_state(self, state: str) -> None:
         self._set_state(state)
-        self._glib.idle_add(self._refresh_labels)
+        self._refresh()
 
     # -- dictation ------------------------------------------------------------
 
     def dictation_on(self) -> bool:
         return self._daemon is not None
 
-    def _start_daemon_locked(self, notify: bool = True) -> None:
+    def _start_daemon_locked(self, notify: bool = True) -> str | None:
+        """Returns an error message if the daemon failed to start."""
         from .cli import _build_backend
         from .dictation.daemon import DictationDaemon
 
@@ -119,6 +103,8 @@ class TrayApp:
             self._daemon = None
             log.exception("failed to start dictation")
             _notify("Dictation failed", str(e))
+            return str(e)
+        return None
 
     def _stop_daemon_locked(self) -> None:
         if self._daemon is None:
@@ -135,8 +121,7 @@ class TrayApp:
                 self._stop_daemon_locked()
                 self._set_state("off")
                 _notify("Dictation off")
-        if self._glib is not None:
-            self._glib.idle_add(self._refresh_labels)
+        self._refresh()
 
     # -- settings controller (called from the HTTP server thread) -------------
 
@@ -146,31 +131,42 @@ class TrayApp:
     def current_model(self) -> str | None:
         return self.config.model.name if self._daemon is not None else None
 
-    def apply_config(self, cfg: Config) -> None:
+    def apply_config(self, cfg: Config) -> str | None:
         """Adopt validated config; restart the daemon in place if running so
-        the new hotkey/mode/output/model take effect without a logout."""
+        the new hotkey/mode/output/model take effect without a logout.
+        Returns an error message if the restart failed."""
         with self._lock:
             self.config = cfg
-            if self._daemon is not None:
-                self._stop_daemon_locked()
-                self._start_daemon_locked(notify=False)
+            if self._daemon is None:
+                return None
+            self._stop_daemon_locked()
+            error = self._start_daemon_locked(notify=False)
+        self._refresh()
+        if error:
+            self._set_state("off")
+        return error
 
     # -- meetings ---------------------------------------------------------------
 
     def meeting_on(self) -> bool:
         return self._meeting is not None
 
-    def toggle_meeting(self, icon=None, item=None) -> None:
+    def toggle_meeting(self, language: str | None = None) -> None:
+        """Start a meeting (in `language`, default from config), or stop the
+        running one whichever menu item was used."""
         with self._lock:
             if self._meeting is None:
                 from .meeting.recorder import MeetingRecorder
+                from .meeting.transcribe import choose_model, save_settings
 
                 out_root = Path(self.config.meeting.output_dir).expanduser()
                 rec = MeetingRecorder(
                     out_root, f"{datetime.now():%H-%M}", when=datetime.now()
                 )
                 try:
+                    rec.model, rec.language = choose_model(self.config, language=language)
                     rec.start()
+                    save_settings(rec.session_dir, rec.model, rec.language)
                 except Exception as e:
                     log.exception("failed to start meeting")
                     _notify("Meeting failed", str(e))
@@ -186,16 +182,20 @@ class TrayApp:
                 threading.Thread(
                     target=self._transcribe_meeting, args=(rec,), daemon=True
                 ).start()
-        if self._glib is not None:
-            self._glib.idle_add(self._refresh_labels)
+        self._refresh()
 
     def _transcribe_meeting(self, rec) -> None:
         try:
             from .cli import _transcribe_session
 
-            # reuse the dictation daemon's already-loaded model if present,
-            # so we don't load a second copy into VRAM
-            backend = self._daemon.backend if self._daemon is not None else None
+            # reuse the dictation daemon's already-loaded model if it's the
+            # one this meeting needs, so we don't load a second copy
+            daemon = self._daemon
+            backend = (
+                daemon.backend
+                if daemon is not None and daemon.config.model.name == rec.model
+                else None
+            )
             _transcribe_session(
                 rec.session_dir, title=rec.title, cfg=self.config, backend=backend
             )
@@ -211,13 +211,13 @@ class TrayApp:
     def open_meetings(self, icon=None, item=None) -> None:
         d = Path(self.config.meeting.output_dir).expanduser()
         d.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(["xdg-open", str(d)])
+        open_target(str(d))
 
     def open_settings(self, icon=None, item=None) -> None:
         if self._server is not None and self._server.url:
-            subprocess.Popen(["xdg-open", self._server.url])
+            open_target(self._server.url)
 
-    def quit(self, *args) -> None:
+    def quit(self) -> None:
         if self._server is not None:
             self._server.stop()
         if self._daemon is not None:
@@ -225,61 +225,60 @@ class TrayApp:
         if self._meeting is not None:
             self._meeting.stop()
         PIDFILE.unlink(missing_ok=True)
-        self._gtk.main_quit()
+        self._ui.quit()
 
     # -- menu -----------------------------------------------------------------
 
-    def _refresh_labels(self) -> None:
-        """Keep menu labels in sync with state (runs on the GTK thread)."""
-        if "dictation" in self._menu_items:
-            self._menu_items["dictation"].set_label(
-                "■ Stop dictation" if self.dictation_on() else "▶ Start dictation"
-            )
-        if "meeting" in self._menu_items:
-            self._menu_items["meeting"].set_label(
-                "■ Stop & transcribe meeting"
-                if self.meeting_on()
-                else "● Record meeting"
-            )
+    @staticmethod
+    def _in_thread(fn):
+        """Menu clicks arrive on the UI thread; model loads must not block it."""
+        return lambda: threading.Thread(target=fn, daemon=True).start()
 
-    def _build_menu(self):
-        Gtk = self._gtk
-        menu = Gtk.Menu()
+    def _language_meetings(self) -> list:
+        """A 'Record meeting in X' row per downloaded single-language model
+        (bengali-whisper-medium -> Bengali), hidden while a meeting runs."""
+        from .engine import models
 
-        def item(key, handler):
-            mi = Gtk.MenuItem(label="")
-            mi.connect("activate", lambda *_: handler())
-            menu.append(mi)
-            if key:
-                self._menu_items[key] = mi
-            return mi
+        rows = []
+        for spec in models.MODELS.values():
+            langs = spec.languages or frozenset()
+            if len(langs) != 1 or langs == {"en"} or not models.is_downloaded(spec.name):
+                continue
+            (language,) = langs
+            rows.append((
+                lambda label=spec.languages_label: (
+                    None if self.meeting_on() else f"● Record meeting in {label}"
+                ),
+                self._in_thread(lambda language=language: self.toggle_meeting(language)),
+            ))
+        return rows
 
-        item("dictation", lambda: threading.Thread(
-            target=self.toggle_dictation, daemon=True).start())
-        item("meeting", lambda: threading.Thread(
-            target=self.toggle_meeting, daemon=True).start())
-        menu.append(Gtk.SeparatorMenuItem())
-        m = Gtk.MenuItem(label="Open meetings folder")
-        m.connect("activate", lambda *_: self.open_meetings())
-        menu.append(m)
-        m = Gtk.MenuItem(label="Settings…")
-        m.connect("activate", lambda *_: self.open_settings())
-        menu.append(m)
-        menu.append(Gtk.SeparatorMenuItem())
-        m = Gtk.MenuItem(label="Quit")
-        m.connect("activate", self.quit)
-        menu.append(m)
-
-        menu.show_all()
-        self._refresh_labels()
-        return menu
+    def menu(self) -> list:
+        """Rows of (label function, handler), or None for a separator. The
+        shell re-reads labels on refresh(); a None label hides the row."""
+        return [
+            (
+                lambda: "■ Stop dictation" if self.dictation_on() else "▶ Start dictation",
+                self._in_thread(self.toggle_dictation),
+            ),
+            (
+                lambda: "■ Stop & transcribe meeting" if self.meeting_on() else "● Record meeting",
+                self._in_thread(self.toggle_meeting),
+            ),
+            *self._language_meetings(),
+            None,
+            (lambda: "Open meetings folder", self.open_meetings),
+            (lambda: "Settings…", self.open_settings),
+            None,
+            (lambda: "Quit", self.quit),
+        ]
 
     # -- lifecycle ------------------------------------------------------------
 
     def run(self) -> None:
         if not _single_instance():
             log.warning("another local-stt tray is already running; exiting")
-            _notify("local-stt already running", "The tray is already in the panel.")
+            _notify("local-stt already running", "It is already in the menu bar / panel.")
             return
 
         try:
@@ -288,21 +287,9 @@ class TrayApp:
             PIDFILE.unlink(missing_ok=True)
 
     def _run(self) -> None:
-        from .ui.icons import ensure_icons, icon_name
-
-        self._gtk, self._glib, AppIndicator = _load_gi()
-        icon_dir = ensure_icons()
-
-        self.indicator = AppIndicator.Indicator.new(
-            "local-stt",
-            icon_name("off"),
-            AppIndicator.IndicatorCategory.APPLICATION_STATUS,
-        )
-        self.indicator.set_icon_theme_path(str(icon_dir))
-        self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-        self.indicator.set_title("local-stt")
-        self.indicator.set_menu(self._build_menu())
-        log.info("tray running (AppIndicator)")
+        self._ui = _make_shell()
+        self._ui.build(self.menu())
+        self._ui.set_state(self._dictation_state)
 
         from .ui.server import SettingsServer
 
@@ -315,7 +302,7 @@ class TrayApp:
 
         # start dictation by default — the reason the tray exists
         threading.Thread(target=self.toggle_dictation, daemon=True).start()
-        self._gtk.main()
+        self._ui.run(on_signal=self.quit)
 
 
 def main(config: Config | None = None) -> int:

@@ -11,6 +11,9 @@ dependencies = [
     "pynput>=1.7.6",
     "pillow>=10",
     "tomlkit>=0.12",
+    # Parakeet on the Apple Silicon GPU; the backend reuses its chunk-merge
+    # helpers, so stay on 0.5.x
+    "parakeet-mlx>=0.5.2,<0.6; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 # Note: the tray uses the system PyGObject + Ayatana AppIndicator (GTK3),
 # not a pip package — see tray._load_gi(). On Mint these ship preinstalled
@@ -22,7 +25,13 @@ cuda = [
     "nvidia-cudnn-cu12>=9",
 ]
 diarize = [
-    "pyannote.audio>=3.1",
+    "pyannote.audio>=4.0",
+]
+# converts Whisper fine-tunes (e.g. bengali-whisper-medium) to CTranslate2
+# on download; not needed at runtime
+convert = [
+    "transformers>=4.40",
+    "torch>=2.2",
 ]
 # Wayland hotkeys need evdev, which the override below excludes (it requires
 # python3-dev to build). To enable: sudo apt install python3-dev, delete the

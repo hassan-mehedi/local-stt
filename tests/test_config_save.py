@@ -65,3 +65,26 @@ def test_save_rejects_invalid_without_writing(tmp_path):
     with pytest.raises(ConfigError):
         save_config(cfg, path)
     assert not path.exists()  # nothing written on validation failure
+
+
+def test_validate_rejects_language_the_model_lacks(monkeypatch):
+    import local_stt.engine.models as models
+
+    monkeypatch.setattr(models, "is_apple_silicon", lambda: True)
+    cfg = Config()
+    cfg.model.name = "parakeet-tdt-0.6b-v2"
+    cfg.model.language = "de"
+    with pytest.raises(ConfigError, match="does not support language 'de'"):
+        validate(cfg)
+    cfg.model.name = "parakeet-tdt-0.6b-v3"
+    assert validate(cfg)
+
+
+def test_validate_rejects_parakeet_off_apple_silicon(monkeypatch):
+    import local_stt.engine.models as models
+
+    monkeypatch.setattr(models, "is_apple_silicon", lambda: False)
+    cfg = Config()
+    cfg.model.name = "parakeet-tdt-0.6b-v3"
+    with pytest.raises(ConfigError, match="Apple Silicon"):
+        validate(cfg)

@@ -1,15 +1,15 @@
 # local-stt
 
-Local, offline speech-to-text for Linux. Press a hotkey, speak, press again — the text appears in whatever app has focus. Also transcribes audio/video files and records meetings (your mic + the other side) with speaker labels. Everything runs on your machine: no cloud, no account, no telemetry.
+Local, offline speech-to-text for Linux and macOS (Apple Silicon). Press a hotkey, speak, press again — the text appears in whatever app has focus. Also transcribes audio/video files and records meetings (your mic + the other side) with speaker labels. Everything runs on your machine: no cloud, no account, no telemetry.
 
 - **Dictation** — global hotkey toggles recording; transcribes and types into the focused window.
 - **File transcription** — any audio/video → `txt` / `md` / `srt` / `vtt` / `json`.
 - **Meetings** — records mic ("Me") and system audio ("Them") as separate tracks, transcribes and merges them. Optional speaker diarization.
 - **Tray app** — status icon + menu, with a browser-based settings page (switch models, rebind the hotkey, manage downloads).
 
-Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2). Uses your NVIDIA GPU if present, falls back to CPU.
+Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2), which uses your NVIDIA GPU if present and falls back to CPU. On Apple Silicon the default is NVIDIA Parakeet via [parakeet-mlx](https://github.com/senstella/parakeet-mlx), which runs on the Mac's GPU.
 
-See [SPEC.md](SPEC.md) for the full design.
+On a Mac, skip to [macOS](#macos-apple-silicon); the sections before it are for Linux.
 
 ---
 
@@ -96,6 +96,56 @@ Only one tray runs at a time — the service plus a manual `stt tray` won't doub
 
 ---
 
+## macOS (Apple Silicon)
+
+### Requirements
+
+- **macOS 14.2 or later** on Apple Silicon (meeting capture uses Core Audio process taps, added in 14.2).
+- **[uv](https://docs.astral.sh/uv/)**: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **Xcode command line tools**, for meetings only: `xcode-select --install`. The first meeting compiles a small Swift helper that records system audio; it is cached in `~/.cache/local-stt/bin/`.
+- **ffmpeg**, only for `stt file` on formats other than 16-bit WAV: `brew install ffmpeg`.
+
+### Install
+
+```bash
+uv tool install --editable .
+stt models download parakeet-tdt-0.6b-v2    # the Mac default, ~2.5 GB, English
+stt tray
+```
+
+A mic icon appears in the menu bar: slashed = off, plain = listening, red = recording, orange waveform = transcribing. Dictation starts on its own. The default hotkey is Option+Shift+T. The app keeps that keystroke from reaching the focused window, so it doesn't type "ˇ".
+
+### Permissions
+
+macOS asks for these the first time each is needed. Grant them to the app that runs `stt`: your terminal when you run it by hand, or the Python binary named in the error message when it runs as a login agent. Restart `stt` after granting.
+
+| Permission (System Settings > Privacy & Security) | Needed for |
+|---|---|
+| Input Monitoring | reading the hotkey |
+| Accessibility | typing or pasting the text into the focused app |
+| Microphone | dictation and the "Me" meeting track |
+| Screen & System Audio Recording > System Audio Recording Only | the "Them" meeting track. Without it the track is silent and the log says so |
+
+### Start at login (launchd)
+
+```bash
+mkdir -p ~/Library/LaunchAgents
+sed "s|__HOME__|$HOME|g" packaging/local-stt.plist > ~/Library/LaunchAgents/local-stt.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local-stt.plist
+```
+
+Manage it:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/local-stt     # restart, e.g. after an upgrade
+launchctl bootout gui/$(id -u)/local-stt          # stop and remove from this login
+tail -f ~/Library/Logs/local-stt.log
+```
+
+launchd restarts the app if it crashes, but not after you pick Quit from the menu.
+
+---
+
 ## Usage
 
 ```bash
@@ -117,6 +167,7 @@ stt meeting --name "weekly standup"
 stt meeting stop                          # from another terminal, or just Ctrl+C
 stt meeting transcribe <session-dir>      # (re)transcribe an existing recording
 stt meeting --name "standup" --diarize    # split remote speakers (see below)
+stt meeting --name "sync" --language bn   # a Bengali meeting (see below)
 
 # Models
 stt models list
@@ -147,7 +198,7 @@ stt models remove medium
 
 ```toml
 [model]
-name = "large-v3-turbo"       # see the model table below
+name = "large-v3-turbo"       # Linux default; Apple Silicon defaults to parakeet-tdt-0.6b-v2
 compute_type = "float16"      # try "int8_float16" if latency is poor or VRAM is tight
 device = "auto"               # "auto" | "cuda" | "cpu"
 language = "en"               # "" = auto-detect
@@ -155,7 +206,7 @@ language = "en"               # "" = auto-detect
 [dictation]
 hotkey = "<alt>+<shift>+t"
 mode = "toggle"               # "toggle" (press start/stop) | "hold" (push-to-talk)
-output = "type"               # "type" (xdotool) | "clipboard" (xclip + Ctrl+V)
+output = "type"               # "type" | "clipboard" (paste with Ctrl+V, Cmd+V on macOS)
 listener = "auto"             # "auto" | "pynput" (X11) | "evdev" (Wayland)
 min_duration_ms = 300         # ignore shorter recordings
 max_duration_ms = 300000      # toggle-mode auto-stop after this long (0 = off)
@@ -164,6 +215,8 @@ notify = true
 
 [meeting]
 output_dir = "~/Documents/meetings"
+model = ""                    # blank = the [model] name
+language = ""                 # blank = the [model] language
 
 [diarize]
 hf_token = ""                 # Hugging Face token (or set HF_TOKEN); see below
@@ -177,13 +230,34 @@ All run offline once downloaded (cached in `~/.cache/local-stt/models/`). Pick w
 
 | Model | Size | Notes |
 |---|---|---|
-| `large-v3-turbo` | ~1.6 GB | **Default.** Best quality/speed balance; great on a 6 GB+ GPU. |
+| `large-v3-turbo` | ~1.6 GB | **Default on Linux.** Best quality/speed balance; great on a 6 GB+ GPU. |
 | `large-v3` | ~3 GB | Highest quality, slower. |
 | `distil-large-v3` | ~1.5 GB | Faster, English-leaning. |
 | `medium` | ~1.5 GB | Good on smaller GPUs. |
 | `small` / `base` / `tiny` | 484 / 145 / 75 MB | Lightweight; CPU-friendly, lower accuracy. |
+| `parakeet-tdt-0.6b-v2` | ~2.5 GB | **Default on Apple Silicon.** NVIDIA Parakeet, English only. Apple Silicon only for now (runs on the GPU via [parakeet-mlx](https://github.com/senstella/parakeet-mlx)). |
+| `parakeet-tdt-0.6b-v3` | ~2.5 GB | Parakeet for 25 European languages, detects the language itself. Apple Silicon only for now. |
+
+Parakeet ignores `[model] language` (v3 picks the language on its own) and has no translate mode. Languages outside its list, such as Arabic or Hindi, need a Whisper model.
 
 If a model won't fit in VRAM, set `compute_type = "int8_float16"` (or `"int8"`), or choose a smaller model.
+
+---
+
+## Bengali meetings
+
+Parakeet has no Bengali. For Bengali meetings there is `bengali-whisper-medium`, a Whisper medium fine-tune from [Bengali.AI](https://huggingface.co/bengaliAI/tugstugi_bengaliai-asr_whisper-medium) (Apache 2.0). On hour-long Bengali recordings it scored 34.8% WER in the [ShobdoSetu paper](https://arxiv.org/pdf/2603.19256), against 75.0% for stock Whisper large-v3. Expect to correct roughly one word in three.
+
+The model ships in the Hugging Face transformers format, so the download converts it to CTranslate2 once. The conversion needs the `convert` extra:
+
+```bash
+uv tool install --editable '.[convert]'
+stt models download bengali-whisper-medium    # ~3 GB download, 1.5 GB kept
+```
+
+Then either pass `--language bn` (it picks this model because the default one has no Bengali), or pick **Record meeting in Bengali** from the menu bar. The choice is saved in the session's `session.json`, so `stt meeting transcribe` reuses it.
+
+It runs on the CPU (CTranslate2 has no Apple GPU support): about 2x real time on an M4 Pro, so an hour of audio takes roughly 30 minutes.
 
 ---
 
@@ -191,7 +265,7 @@ If a model won't fit in VRAM, set `compute_type = "int8_float16"` (or `"int8"`),
 
 `--diarize` splits the remote side of a meeting into `Them 1`, `Them 2`, … using [pyannote](https://github.com/pyannote/pyannote-audio). It's a heavy extra (~2.5 GB of PyTorch) and uses gated models:
 
-1. Accept the conditions at [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0).
+1. Accept the conditions at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1).
 2. Create a token at <https://huggingface.co/settings/tokens> and put it in the config (`[diarize] hf_token = "hf_…"`) or export `HF_TOKEN`.
 3. Install the extra:
    ```bash
@@ -222,15 +296,18 @@ This project targets X11. Wayland support is implemented but **unverified**. To 
 | **"Them" track is empty in meetings** | Audio was playing to a non-default output, or system volume was at zero (sink capture is post-volume). Raise volume / set the right output device. |
 | **`model not downloaded`** | `stt models download large-v3-turbo`. |
 | **CUDA errors on load** | It falls back to CPU automatically; for GPU, ensure a recent NVIDIA driver is installed. |
+| **macOS: hotkey does nothing** | Allow Input Monitoring for the app running `stt`, then restart it. |
+| **macOS: text never appears** | Allow Accessibility for the app running `stt`, then restart it. |
+| **macOS: "Them" track is silent** | Allow System Audio Recording Only (see [Permissions](#permissions)). |
 
-Logs print to the terminal that launched `stt tray` / `stt dictate`. Add `--debug` for full tracebacks.
+Logs print to the terminal that launched `stt tray` / `stt dictate`, or to `~/Library/Logs/local-stt.log` under launchd. Add `--debug` for full tracebacks.
 
 ---
 
 ## Development
 
 ```bash
-uv sync --extra cuda --group dev
+uv sync --extra cuda --group dev    # on macOS: uv sync --group dev
 uv run pytest
 ```
 
@@ -238,6 +315,7 @@ After changing dependencies, reinstall the global tool so it picks them up:
 
 ```bash
 uv tool install --editable '.[cuda]' --overrides overrides.txt --reinstall
+uv tool install --editable . --reinstall    # macOS
 ```
 
 Models are cached in `~/.cache/local-stt/models/`; the tray writes its settings-server URL to `~/.cache/local-stt/ui.json`.

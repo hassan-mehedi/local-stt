@@ -14,10 +14,18 @@ from .config import load_config
 
 
 def _build_backend(cfg, model_override=None, device_override=None):
+    from .engine import models
+
+    name = model_override or cfg.model.name
+    if models.spec(name).family == models.PARAKEET:
+        from .engine.parakeet_mlx_backend import ParakeetMlxBackend
+
+        return ParakeetMlxBackend(model_name=name)
+
     from .engine.faster_whisper_backend import FasterWhisperBackend
 
     return FasterWhisperBackend(
-        model_name=model_override or cfg.model.name,
+        model_name=name,
         device=device_override or cfg.model.device,
         compute_type=cfg.model.compute_type,
     )
@@ -95,11 +103,12 @@ def cmd_file(args) -> int:
 
 
 def _transcribe_session(
-    session_dir: Path, title: str, cfg, model_override=None, diarize=False, backend=None
+    session_dir: Path, title: str, cfg, model_override=None, language_override=None,
+    diarize=False, backend=None,
 ) -> int:
     from .engine.backend import TranscribeOptions
     from .export import export
-    from .meeting.transcribe import transcribe_meeting
+    from .meeting.transcribe import choose_model, load_settings, transcribe_meeting
 
     mic_wav = session_dir / "raw" / "mic.wav"
     system_wav = session_dir / "raw" / "system.wav"
@@ -108,18 +117,27 @@ def _transcribe_session(
             print(f"error: {p} not found — not a meeting session dir?", file=sys.stderr)
             return 1
 
+    # what the session was recorded with, unless overridden now
+    saved = load_settings(session_dir)
+    model, language = choose_model(
+        cfg,
+        model_override or saved.get("model"),
+        language_override if language_override is not None else saved.get("language"),
+    )
+
     # Reuse a caller-supplied backend (e.g. the tray's resident dictation
     # model) instead of loading a second copy into VRAM.
     owns_backend = backend is None
     if backend is None:
-        backend = _build_backend(cfg, model_override=model_override)
+        backend = _build_backend(cfg, model_override=model)
+    print(f"  model {model}, language {language or 'auto'}", file=sys.stderr)
 
     def progress(done: float, total: float):
         pct = 100 * done / total if total else 0
         print(f"\r  {pct:5.1f}%", end="", file=sys.stderr, flush=True)
 
     opts = TranscribeOptions(
-        language=cfg.model.language or None,
+        language=language or None,
         batched=True,
         progress_cb=progress,
     )
@@ -172,14 +190,19 @@ def cmd_meeting(args) -> int:
         session_dir = Path(args.dir).expanduser().resolve()
         return _transcribe_session(
             session_dir, title=session_dir.name, cfg=cfg,
-            model_override=args.model, diarize=args.diarize,
+            model_override=args.model, language_override=args.language,
+            diarize=args.diarize,
         )
 
+    from .meeting.transcribe import choose_model, save_settings
+
+    model, language = choose_model(cfg, args.model, args.language)  # fail before recording
     title = args.name or "meeting"
     out_root = Path(cfg.meeting.output_dir).expanduser()
     recorder = MeetingRecorder(out_root, title, when=datetime.now())
 
     recorder.start()
+    save_settings(recorder.session_dir, model, language)
     print(
         f"Recording to {recorder.session_dir}\n"
         "  mic -> Me, system audio -> Them\n"
@@ -196,7 +219,6 @@ def cmd_meeting(args) -> int:
         recorder.session_dir,
         title=f"{title} — {datetime.now():%Y-%m-%d}",
         cfg=cfg,
-        model_override=args.model,
         diarize=args.diarize,
     )
 
@@ -208,16 +230,16 @@ def cmd_tray(args) -> int:
 
 
 def cmd_settings(args) -> int:
-    import subprocess
     import time
 
+    from .desktop import open_target
     from .ui.state import read_state
 
     # if the tray's server is already up, just open it
     existing = read_state()
     if existing and _server_alive(existing):
         print(f"Opening {existing['url']}", file=sys.stderr)
-        subprocess.Popen(["xdg-open", existing["url"]])
+        open_target(existing["url"])
         return 0
 
     # otherwise run a standalone (config-only) server until Ctrl+C
@@ -230,7 +252,7 @@ def cmd_settings(args) -> int:
         "config.toml)\nPress Ctrl+C to stop.",
         file=sys.stderr,
     )
-    subprocess.Popen(["xdg-open", url])
+    open_target(url)
     try:
         while True:
             time.sleep(3600)
@@ -260,9 +282,14 @@ def cmd_models(args) -> int:
     from .engine import models
 
     if args.models_cmd == "list":
-        for name in models.KNOWN_MODELS:
-            mark = "✓ downloaded" if models.is_downloaded(name) else "  -"
-            print(f"{name:20s} {mark}")
+        for spec in models.MODELS.values():
+            mark = "✓ downloaded" if models.is_downloaded(spec.name) else "  -"
+            reason = models.unavailable_reason(spec.name)
+            note = f"  ({reason})" if reason else ""
+            print(
+                f"{spec.name:22s} {spec.family:8s} {spec.languages_label:22s} "
+                f"{mark}{note}"
+            )
         return 0
     if args.models_cmd == "download":
         print(f"Downloading {args.name}...", file=sys.stderr)
@@ -316,6 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
     mt.add_argument("--name", help="meeting title (used in the output directory name)")
     mt.add_argument("--model", help="override configured model")
     mt.add_argument(
+        "--language",
+        help="meeting language, e.g. 'bn'; picks a downloaded model for it if the "
+        "configured one can't do it",
+    )
+    mt.add_argument(
         "--diarize", action="store_true",
         help="split remote speakers with pyannote (needs [diarize] extra + HF token)",
     )
@@ -347,7 +379,8 @@ def main(argv: list[str] | None = None) -> int:
         datefmt="%H:%M:%S",
     )
     if not args.debug:
-        logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+        for noisy in ("faster_whisper", "httpx"):  # httpx logs every HF request
+            logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         return args.func(args)
     except KeyboardInterrupt:
