@@ -67,7 +67,7 @@ class FasterWhisperBackend(AsrBackend):
         if not models.is_downloaded(self.model_name):
             raise FileNotFoundError(
                 f"Model '{self.model_name}' is not downloaded. "
-                f"Run: stt models download {self.model_name}"
+                + models.download_hint(self.model_name)
             )
         models.preload_cuda_libraries()
         device, compute_type = self._resolve_device()

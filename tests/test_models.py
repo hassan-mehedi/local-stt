@@ -59,3 +59,13 @@ def test_download_progress_compares_bytes_on_disk_to_the_model_size(models_dir):
 
 def test_download_progress_is_unknown_while_converting(models_dir):
     assert models.download_progress("bengali-whisper-medium") is None
+
+
+def test_download_hint_depends_on_the_install(monkeypatch):
+    import local_stt.desktop as desktop
+    from local_stt.engine import models
+
+    monkeypatch.setattr(desktop, "app_bundle", lambda: None)
+    assert models.download_hint("parakeet-tdt-0.6b-v2") == "Run: stt models download parakeet-tdt-0.6b-v2"
+    monkeypatch.setattr(desktop, "app_bundle", lambda: "/Applications/local-stt.app")
+    assert "local-stt Settings" in models.download_hint("parakeet-tdt-0.6b-v2")

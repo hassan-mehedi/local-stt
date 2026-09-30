@@ -9,12 +9,12 @@ The right backend is picked per platform and session type at startup.
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 import sys
 from abc import ABC, abstractmethod
 
+from ..desktop import permission_hint
 from .listeners import is_wayland
 
 log = logging.getLogger(__name__)
@@ -121,10 +121,7 @@ def _require_accessibility() -> None:
         {HIServices.kAXTrustedCheckOptionPrompt: True}
     ):
         raise RuntimeError(
-            "macOS blocks synthetic key presses from this app. Allow it in System "
-            "Settings > Privacy & Security > Accessibility (add the terminal you "
-            f"run stt from, or {os.path.realpath(sys.executable)} when it runs as "
-            "a login agent), then restart."
+            "macOS blocks typing from this app. " + permission_hint("Accessibility")
         )
 
 
@@ -136,7 +133,10 @@ class MacTypeOutput(TextOutput):
     def __init__(self):
         from pynput.keyboard import Controller
 
+        from .mac_layout import use_snapshot
+
         _require_accessibility()
+        use_snapshot()
         self._keyboard = Controller()
 
     def emit(self, text: str) -> None:
@@ -149,7 +149,10 @@ class MacClipboardOutput(TextOutput):
     def __init__(self):
         from pynput.keyboard import Controller
 
+        from .mac_layout import use_snapshot
+
         _require_accessibility()
+        use_snapshot()
         self._keyboard = Controller()
 
     def emit(self, text: str) -> None:

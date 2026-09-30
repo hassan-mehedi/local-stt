@@ -13,13 +13,21 @@ function escapeHtml(text) {
 }
 
 const MAC_MODIFIERS = { ctrl: "⌃", alt: "⌥", shift: "⇧", super: "⌘", cmd: "⌘" };
+const PC_MODIFIERS = { ctrl: "Ctrl", alt: "Alt", shift: "Shift", super: "Super", cmd: "Super" };
+
+function fmtKey(part) {
+  const sided = part.match(/^(alt|ctrl|shift|cmd)_([lr])$/);
+  if (sided) {
+    const name = (IS_MAC ? MAC_MODIFIERS : PC_MODIFIERS)[sided[1]];
+    return (sided[2] === "l" ? "Left " : "Right ") + name;
+  }
+  if (IS_MAC && MAC_MODIFIERS[part]) return MAC_MODIFIERS[part];
+  return part.length === 1 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1);
+}
 
 function fmtHotkey(raw) {
-  const parts = raw.replace(/[<>]/g, "").split("+");
-  if (IS_MAC) {
-    return parts.map(p => MAC_MODIFIERS[p] ?? (p.length === 1 ? p.toUpperCase() : p)).join("");
-  }
-  return parts.map(p => p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1)).join("+");
+  const parts = raw.replace(/[<>]/g, "").split("+").map(fmtKey);
+  return parts.join(IS_MAC && !parts.some(p => p.includes(" ")) ? "" : "+");
 }
 
 function setSeg(id, value) {
@@ -46,6 +54,10 @@ const NAMED_KEYS = {
   Slash: "/", Backquote: "`",
 };
 const MODIFIER_CODE = /^(Control|Alt|Shift|Meta|OS)(Left|Right)?$/;
+const SIDED_MODIFIERS = {
+  AltLeft: "alt_l", AltRight: "alt_r", ControlLeft: "ctrl_l", ControlRight: "ctrl_r",
+  ShiftLeft: "shift_l", ShiftRight: "shift_r", MetaLeft: "cmd_l", MetaRight: "cmd_r",
+};
 
 function triggerFromCode(code) {
   let m;
@@ -55,9 +67,17 @@ function triggerFromCode(code) {
   return NAMED_KEYS[code] ?? null;
 }
 
-// Makes a readonly input record a shortcut when clicked. Returns set(raw).
+// Makes a readonly input record a shortcut when clicked: a combo like
+// Option+Shift+T, or one modifier tapped on its own (Right Option).
+// Returns set(raw).
 function hotkeyCapture(input, hint, onChange) {
   const idleHint = hint.textContent;
+  let lone = null; // the only key held so far, if it is a modifier
+  const record = (raw) => {
+    input.dataset.raw = raw;
+    end();
+    onChange(raw);
+  };
   const end = () => {
     input.classList.remove("capturing");
     input.value = fmtHotkey(input.dataset.raw || "");
@@ -67,13 +87,19 @@ function hotkeyCapture(input, hint, onChange) {
   input.onclick = () => {
     input.classList.add("capturing");
     input.value = "press keys…";
-    hint.textContent = "Press the shortcut. Esc cancels.";
+    hint.textContent = "Press the shortcut, or tap one modifier key. Esc cancels.";
+    lone = null;
   };
   input.onblur = () => { if (input.classList.contains("capturing")) end(); };
   input.onkeydown = (e) => {
     if (!input.classList.contains("capturing")) return;
     e.preventDefault();
-    if (MODIFIER_CODE.test(e.code)) return; // wait for the trigger key
+    if (MODIFIER_CODE.test(e.code)) {
+      const held = e.ctrlKey + e.altKey + e.shiftKey + e.metaKey;
+      lone = held === 1 && SIDED_MODIFIERS[e.code] ? e.code : null;
+      return; // wait for the trigger key, or for this modifier's release
+    }
+    lone = null;
     if (e.code === "Escape") return end();
     const trigger = triggerFromCode(e.code);
     if (!trigger) {
@@ -86,9 +112,12 @@ function hotkeyCapture(input, hint, onChange) {
     if (e.altKey) mods.push("alt");
     if (e.shiftKey) mods.push("shift");
     if (e.metaKey) mods.push("super");
-    input.dataset.raw = [...mods.map(m => `<${m}>`), trigger].join("+");
-    end();
-    onChange(input.dataset.raw);
+    record([...mods.map(m => `<${m}>`), trigger].join("+"));
+  };
+  input.onkeyup = (e) => {
+    if (!input.classList.contains("capturing") || e.code !== lone) return;
+    e.preventDefault();
+    record(SIDED_MODIFIERS[e.code]);
   };
   return (raw) => { input.dataset.raw = raw; end(); };
 }

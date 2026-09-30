@@ -25,6 +25,7 @@ from AppKit import (
 from Foundation import NSObject
 from PyObjCTools import AppHelper
 
+from ..dictation.mac_layout import use_snapshot
 from .window_mac import PageWindow, install_main_menu
 
 log = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class MacShell:
             self._items.append((item, label))
         self._status_item.setMenu_(menu)
         install_main_menu()
+        use_snapshot()  # dictation starts on a worker thread
         self._set_state("off")
         log.info("menu bar app running")
 

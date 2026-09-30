@@ -151,7 +151,16 @@ class DictationDaemon:
     # -- lifecycle ----------------------------------------------------------------
 
     def start(self) -> None:
-        """Non-blocking: load the model, start the worker and key listener."""
+        """Non-blocking: start the key listener, load the model, start the
+        worker. The listener goes first so a missing permission shows up
+        before a model load. A shortcut pressed during the load is queued."""
+        self._listener = make_listener(
+            self.config.dictation.listener,
+            self.hotkey,
+            on_activate=self._on_activate,
+            on_deactivate=self._on_deactivate,
+        )
+        self._listener.start()
         log.info("loading model %s...", self.config.model.name)
         self.backend.load()  # pay the load cost now, not on first utterance
         # warm the kernels so the first real utterance isn't slow
@@ -163,13 +172,6 @@ class DictationDaemon:
 
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
-        self._listener = make_listener(
-            self.config.dictation.listener,
-            self.hotkey,
-            on_activate=self._on_activate,
-            on_deactivate=self._on_deactivate,
-        )
-        self._listener.start()
         self._state("idle")
 
     def stop(self) -> None:

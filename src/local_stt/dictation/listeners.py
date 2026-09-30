@@ -16,9 +16,15 @@ import os
 import sys
 import threading
 
+from ..desktop import permission_hint
 from .hotkey import Hotkey
 
 log = logging.getLogger(__name__)
+
+# a modifier on one side can be the trigger on its own, e.g. "alt_r"
+SIDED_MODIFIERS = frozenset(
+    f"{mod}_{side}" for mod in ("alt", "ctrl", "shift", "cmd") for side in "lr"
+)
 
 
 class PynputListener:
@@ -50,10 +56,13 @@ class PynputListener:
     def _is_trigger(self, key) -> bool:
         from pynput.keyboard import Key, KeyCode
 
+        trigger = self.hotkey.trigger
+        if trigger in SIDED_MODIFIERS:
+            # compare values: on macOS Key.alt_l is an alias of Key.alt
+            return isinstance(key, Key) and key.value == Key[trigger].value
         if self._trigger_vks and isinstance(key, KeyCode):
             return key.vk in self._trigger_vks  # canonical() drops the vk
         key = self._listener.canonical(key)
-        trigger = self.hotkey.trigger
         if isinstance(key, KeyCode):
             if key.char is not None and key.char.lower() == trigger:
                 return True
@@ -66,10 +75,6 @@ class PynputListener:
         return False
 
     def _on_press(self, key):
-        mod = self._mod_name(key)
-        if mod:
-            self._pressed_mods.add(mod)
-            return
         if self._is_trigger(key):
             if self._trigger_down:
                 return  # auto-repeat
@@ -77,24 +82,35 @@ class PynputListener:
             if self.hotkey.modifiers <= self._pressed_mods:
                 self._swallowing = bool(self._intercept_vks)
                 self.on_activate()
-
-    def _on_release(self, key):
+            return
         mod = self._mod_name(key)
         if mod:
-            self._pressed_mods.discard(mod)
-            return
+            self._pressed_mods.add(mod)
+
+    def _on_release(self, key):
         if self._is_trigger(key):
             self._trigger_down = False
             self.on_deactivate()
+            return
+        mod = self._mod_name(key)
+        if mod:
+            self._pressed_mods.discard(mod)
 
     def start(self) -> None:
         from pynput import keyboard
 
         extra = {}
+        listener_class = keyboard.Listener
         if sys.platform == "darwin":
+            listener_class = _mac_key_listener()
+            from .mac_layout import use_snapshot
+
+            use_snapshot()
             _require_input_monitoring()
             trigger = self.hotkey.trigger
-            if len(trigger) == 1:
+            if trigger in SIDED_MODIFIERS:
+                pass  # never swallowed: a dropped modifier change leaves it stuck
+            elif len(trigger) == 1:
                 # Option changes the character a key types (Option+T is "†"),
                 # so match the physical key instead
                 self._trigger_vks = mac_keycodes(trigger)
@@ -106,10 +122,19 @@ class PynputListener:
             elif trigger in keyboard.Key.__members__:
                 self._intercept_vks = frozenset({keyboard.Key[trigger].value.vk})
             extra["darwin_intercept"] = self._darwin_intercept
-        self._listener = keyboard.Listener(
+        self._listener = listener_class(
             on_press=self._on_press, on_release=self._on_release, **extra
         )
         self._listener.start()
+        self._listener.wait()
+        # pynput's thread returns without an error when macOS refuses the event tap
+        self._listener.join(0.3)
+        if not self._listener.is_alive():
+            self._listener = None
+            raise RuntimeError(
+                "macOS refused to let local-stt read the shortcut. "
+                + permission_hint("Accessibility and Input Monitoring")
+            )
 
     def _darwin_intercept(self, event_type, event):
         """Runs after the press/release callbacks. Returning None drops the
@@ -154,12 +179,23 @@ def _require_input_monitoring() -> None:
     if Quartz.CGPreflightListenEventAccess():
         return
     Quartz.CGRequestListenEventAccess()  # shows the system prompt once
-    raise RuntimeError(
-        "macOS blocks reading the hotkey. Allow it in System Settings > Privacy "
-        "& Security > Input Monitoring (the terminal you run stt from, or "
-        f"{os.path.realpath(sys.executable)} when it runs as a login agent), "
-        "then restart."
-    )
+    raise RuntimeError("macOS blocks reading the shortcut. " + permission_hint("Input Monitoring"))
+
+
+def _mac_key_listener():
+    """pynput's Listener without media key events: it turns those into
+    NSEvents on its own thread, and AppKit belongs to the main thread."""
+    import Quartz
+    from pynput import keyboard
+
+    class KeyListener(keyboard.Listener):
+        _EVENTS = (
+            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventKeyUp)
+            | Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged)
+        )
+
+    return KeyListener
 
 
 class EvdevListener:

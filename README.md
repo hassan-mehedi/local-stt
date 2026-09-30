@@ -200,7 +200,7 @@ stt models remove medium
 `stt settings` (or the tray's **Settings…** item) opens a local page served on `127.0.0.1` with a per-session token — no internet involved. From it you can:
 
 - switch the active model, and download/remove models;
-- rebind the dictation hotkey by **pressing** the combo;
+- rebind the dictation hotkey by **pressing** the combo, or by tapping one modifier on its own (Right Option);
 - change mode (toggle/hold), output (type/clipboard), language, and the meetings folder;
 - set a Hugging Face token for diarization.
 
@@ -220,7 +220,7 @@ device = "auto"               # "auto" | "cuda" | "cpu"
 language = "en"               # "" = auto-detect
 
 [dictation]
-hotkey = "<alt>+<shift>+t"
+hotkey = "<alt>+<shift>+t"    # or one modifier on one side: "alt_r", "cmd_r", "ctrl_l", ...
 mode = "toggle"               # "toggle" (press start/stop) | "hold" (push-to-talk)
 output = "type"               # "type" | "clipboard" (paste with Ctrl+V, Cmd+V on macOS)
 listener = "auto"             # "auto" | "pynput" (X11) | "evdev" (Wayland)

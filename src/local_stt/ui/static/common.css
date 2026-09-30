@@ -64,3 +64,4 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .msg { font-size: 14px; }
 .msg.err { color: var(--danger); }
 .msg.ok { color: var(--accent); }
+[hidden] { display: none !important; }

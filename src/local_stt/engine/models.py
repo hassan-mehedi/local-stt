@@ -113,6 +113,14 @@ def is_downloaded(name: str) -> bool:
     return (d / "model.bin").exists()
 
 
+def download_hint(name: str) -> str:
+    from ..desktop import app_bundle
+
+    if app_bundle():
+        return f"Download {name} in local-stt Settings."
+    return f"Run: stt models download {name}"
+
+
 def download_progress(name: str) -> float | None:
     """Share of the expected size on disk so far, or None while a
     conversion runs (it downloads into a temp dir first)."""

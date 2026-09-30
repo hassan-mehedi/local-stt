@@ -65,6 +65,9 @@ class Controller:
     def finish_onboarding(self) -> None:
         mark_onboarding_done()
 
+    def relaunch(self) -> None:
+        raise RuntimeError("relaunch needs the menu bar app")
+
 
 def build_state(controller: Controller) -> dict:
     cfg = load_config()
@@ -233,6 +236,12 @@ def make_handler(token: str, controller: Controller):
                     return self._send_json({"ok": error is None, "error": error})
                 if path == "/api/onboarding/step":
                     save_onboarding(step=int(self._read_json()["step"]))
+                    return self._send_json({"ok": True})
+                if path == "/api/relaunch":
+                    if app_bundle() is None:
+                        return self._send_json({"error": "relaunch needs local-stt.app"}, 400)
+                    # after the reply is out, since quitting stops this server
+                    threading.Timer(0.3, controller.relaunch).start()
                     return self._send_json({"ok": True})
                 if path == "/api/onboarding/done":
                     controller.finish_onboarding()

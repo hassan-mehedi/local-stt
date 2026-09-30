@@ -174,3 +174,9 @@ def test_unknown_permission_is_rejected(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _req(server, "/api/permissions/request", method="POST", body={"name": "camera"})
     assert exc.value.code == 400
+
+
+def test_relaunch_needs_the_app_bundle(server):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _req(server, "/api/relaunch", method="POST", body={})
+    assert exc.value.code == 400

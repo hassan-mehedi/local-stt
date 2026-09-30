@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -39,3 +40,29 @@ def open_target(target: str) -> None:
 def app_bundle() -> Path | None:
     """The local-stt.app this runs from, or None for a source install."""
     return next((p for p in Path(__file__).resolve().parents if p.suffix == ".app"), None)
+
+
+def permission_hint(pane: str) -> str:
+    """Where to allow a macOS privacy permission, for the app or a source install."""
+    if app_bundle():
+        return (
+            f"Turn on local-stt in System Settings > Privacy & Security > {pane}, "
+            "then quit and reopen local-stt. If it is on already, remove it with "
+            "the minus button and allow it again."
+        )
+    return (
+        f"Allow it in System Settings > Privacy & Security > {pane} (the terminal "
+        f"you run stt from, or {os.path.realpath(sys.executable)} when it runs as "
+        "a login agent), then restart."
+    )
+
+
+def relaunch() -> None:
+    """Opens the app again once this process has exited."""
+    bundle = app_bundle()
+    if bundle is None:
+        raise RuntimeError("relaunch needs local-stt.app")
+    script = 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; open "$0"'
+    subprocess.Popen(
+        ["/bin/sh", "-c", script, str(bundle), str(os.getpid())], start_new_session=True
+    )

@@ -134,3 +134,60 @@ def test_finishing_onboarding_closes_the_window_and_starts_dictation(tmp_path, m
         time.sleep(0.01)
     assert started
     assert "Setup guide…" in [row[0]() for row in app.menu() if row is not None]
+
+
+class _FakeBackend:
+    def __init__(self):
+        self.unloaded = False
+
+    def unload(self):
+        self.unloaded = True
+
+
+def test_failed_dictation_start_frees_the_model(monkeypatch):
+    import local_stt.cli as cli
+    import local_stt.dictation.daemon as daemon_mod
+    from local_stt.tray import TrayApp
+
+    backend = _FakeBackend()
+    stopped = []
+
+    class FailingDaemon:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("macOS blocks reading the shortcut.")
+
+        def stop(self):
+            stopped.append(True)
+
+    monkeypatch.setattr(cli, "_build_backend", lambda cfg: backend)
+    monkeypatch.setattr(daemon_mod, "DictationDaemon", FailingDaemon)
+    monkeypatch.setattr("local_stt.tray._notify", lambda *a: None)
+    app = TrayApp(_cfg())
+    assert app.start_dictation() == "macOS blocks reading the shortcut."
+    assert not app.dictation_on()
+    assert stopped and backend.unloaded
+
+
+def test_saving_meeting_settings_keeps_dictation_running(monkeypatch):
+    import copy
+
+    from local_stt.tray import TrayApp
+
+    app = TrayApp(_cfg())
+    app._daemon = object()
+    restarts = []
+    monkeypatch.setattr(app, "_stop_daemon_locked", lambda: restarts.append("stop"))
+    monkeypatch.setattr(app, "_start_daemon_locked", lambda notify=True: restarts.append("start"))
+
+    cfg = copy.deepcopy(app.config)
+    cfg.meeting.output_dir = "~/elsewhere"
+    assert app.apply_config(cfg) is None
+    assert restarts == []
+
+    cfg = copy.deepcopy(cfg)
+    cfg.dictation.hotkey = "alt_r"
+    app.apply_config(cfg)
+    assert restarts == ["stop", "start"]

@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import CACHE_DIR, Config, load_config, mark_onboarding_done, onboarding_done
-from .desktop import notify, open_target
+from .desktop import notify, open_target, relaunch
 
 log = logging.getLogger(__name__)
 
@@ -89,21 +89,23 @@ class TrayApp:
         from .cli import _build_backend
         from .dictation.daemon import DictationDaemon
 
+        backend = daemon = None
         try:
-            self._daemon = DictationDaemon(
-                self.config,
-                _build_backend(self.config),
-                on_state=self._on_dictation_state,
-            )
-            self._daemon.start()
-            if notify:
-                verb = "hold" if self.config.dictation.mode == "hold" else "press"
-                _notify("Dictation on", f"{verb} {self.config.dictation.hotkey}")
+            backend = _build_backend(self.config)
+            daemon = DictationDaemon(self.config, backend, on_state=self._on_dictation_state)
+            daemon.start()
         except Exception as e:
-            self._daemon = None
             log.exception("failed to start dictation")
+            if daemon is not None:
+                daemon.stop()
+            if backend is not None:
+                backend.unload()
             _notify("Dictation failed", str(e))
             return str(e)
+        self._daemon = daemon
+        if notify:
+            verb = "hold" if self.config.dictation.mode == "hold" else "press"
+            _notify("Dictation on", f"{verb} {self.config.dictation.hotkey}")
         return None
 
     def _stop_daemon_locked(self) -> None:
@@ -142,6 +144,10 @@ class TrayApp:
         self._refresh()
         return error
 
+    def relaunch(self) -> None:
+        relaunch()
+        self.quit()
+
     def finish_onboarding(self) -> None:
         mark_onboarding_done()
         if self._ui is not None:
@@ -153,8 +159,9 @@ class TrayApp:
         the new hotkey/mode/output/model take effect without a logout.
         Returns an error message if the restart failed."""
         with self._lock:
+            unchanged = (cfg.model, cfg.dictation) == (self.config.model, self.config.dictation)
             self.config = cfg
-            if self._daemon is None:
+            if self._daemon is None or unchanged:
                 return None
             self._stop_daemon_locked()
             error = self._start_daemon_locked(notify=False)

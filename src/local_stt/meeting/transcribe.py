@@ -28,8 +28,8 @@ def choose_model(cfg, model: str | None = None, language: str | None = None) -> 
         fallback = models.best_for_language(language)
         if fallback is None:
             raise ValueError(
-                f"No downloaded model transcribes {language!r}. For Bengali run: "
-                "stt models download bengali-whisper-medium"
+                f"No downloaded model transcribes {language!r}. For Bengali: "
+                + models.download_hint("bengali-whisper-medium")
             )
         model = fallback
     return model, language

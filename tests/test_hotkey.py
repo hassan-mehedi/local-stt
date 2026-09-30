@@ -37,3 +37,9 @@ def test_rejects_two_triggers():
 def test_rejects_modifier_only():
     with pytest.raises(ValueError):
         parse_hotkey("<super>")
+
+
+def test_lone_sided_modifier_is_a_trigger():
+    hk = parse_hotkey("alt_r")
+    assert hk.modifiers == frozenset()
+    assert hk.trigger == "alt_r"

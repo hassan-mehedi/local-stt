@@ -29,7 +29,7 @@
     background: var(--muted); margin-right: 6px; }
   .rec.idle { background: var(--accent); }
   .rec.recording { background: var(--danger); }
-  .rec.transcribing { background: var(--warn); }
+  .rec.transcribing, .rec.starting { background: var(--warn); }
   textarea { min-height: 96px; resize: vertical; }
   .keys { font-family: ui-monospace, monospace; background: var(--panel2);
     border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; }
@@ -64,7 +64,7 @@
     <h1>Permissions</h1>
     <p class="lead" id="permLead">macOS asks you to allow each of these once.</p>
     <section id="perms"></section>
-    <p class="hint" id="permHint">Allowed something and it still says missing? Quit local-stt from the menu bar and open it again.</p>
+    <p class="hint" id="permHint">Allowed something and it still says missing? <span class="appOnly"><button class="btn relaunch">Relaunch local-stt</button></span><span class="srcOnly">Quit stt and start it again.</span></p>
   </div>
 
   <div class="step" data-step="model">
@@ -89,7 +89,7 @@
         <label class="name">Shortcut</label>
         <input type="text" class="hk" id="hotkey" readonly value="…">
       </div>
-      <div class="hint" id="hkHint">Click the field, then press your shortcut.</div>
+      <div class="hint" id="hkHint">Click the field, then press a shortcut. One modifier on its own, like Right Option, works too.</div>
       <div class="row" style="margin-top:12px">
         <label class="name">Mode</label>
         <div class="seg" id="mode">
@@ -108,6 +108,7 @@
       <div class="row">
         <button class="btn" id="startDictation">Save and start dictation</button>
         <span class="hint" id="dictStatus"><span class="rec"></span>dictation off</span>
+        <button class="btn relaunch" id="dictRelaunch" hidden>Relaunch local-stt</button>
       </div>
       <textarea id="tryBox" placeholder="Click here, press your shortcut, say a sentence, and press it again."></textarea>
     </section>
@@ -168,10 +169,10 @@ const PERMS = [
   { name: "system_audio", title: "System audio", why: "Records the other side of meetings. The test plays a short sound." },
 ];
 const STATE_TEXT = { granted: "allowed", denied: "missing", not_asked: "not yet", unknown: "not tested" };
-const DICTATION_TEXT = { off: "dictation off", idle: "listening for your shortcut",
-  recording: "recording…", transcribing: "transcribing…" };
+const DICTATION_TEXT = { off: "dictation off", starting: "starting dictation…",
+  idle: "listening for your shortcut", recording: "recording…", transcribing: "transcribing…" };
 
-let state = null, perms = null, steps = [], current = 0, timer = null;
+let state = null, perms = null, steps = [], current = 0, timer = null, starting = false;
 const draft = { model: {}, dictation: {}, meeting: {} };
 
 function flash(text, isErr) {
@@ -195,13 +196,26 @@ function show(index) {
   post("/api/onboarding/step", { step: current });
   clearInterval(timer);
   if (name === "permissions") { loadPerms(); timer = setInterval(loadPerms, 2000); }
-  if (name === "dictation") { timer = setInterval(refreshDictation, 1000); }
+  if (name === "dictation") {
+    timer = setInterval(refreshDictation, 1000);
+    if (!state.daemon_running) startDictation();
+  }
   if (name === "done") { loadPerms(); }
   render();
 }
 
+let skipPermsWarned = false;
+
 // Saves what the step changed; returns false to stay on the step.
 async function leave(name) {
+  if (name === "permissions" && !skipPermsWarned) {
+    const missing = PERMS.filter(p => p.name !== "system_audio" && perms.status[p.name] !== "granted");
+    if (missing.length) {
+      skipPermsWarned = true;
+      flash(`Dictation needs ${missing.map(p => p.title).join(" and ")}. Allow ${missing.length > 1 ? "them" : "it"}, or press Continue again to skip for now.`, true);
+      return false;
+    }
+  }
   if (name === "model") {
     const chosen = draft.model.name ?? state.config.model.name;
     const m = state.models.find(m => m.name === chosen);
@@ -269,9 +283,6 @@ function render() {
   document.getElementById("doneDictate").innerHTML = hold
     ? `Dictate: hold <span class="keys">${escapeHtml(hk)}</span> while you speak.`
     : `Dictate: press <span class="keys">${escapeHtml(hk)}</span>, speak, press it again.`;
-  document.getElementById("tryBox").placeholder = hold
-    ? `Click here, then hold ${hk} while you say a sentence.`
-    : `Click here, press ${hk}, say a sentence, and press ${hk} again.`;
   if (!document.getElementById("output_dir").value) {
     document.getElementById("output_dir").value = draft.meeting.output_dir ?? c.meeting.output_dir;
   }
@@ -279,11 +290,19 @@ function render() {
 }
 
 function renderDictation() {
-  const s = state.daemon_running ? state.dictation_state : "off";
+  const s = starting ? "starting" : state.daemon_running ? state.dictation_state : "off";
   document.getElementById("dictStatus").innerHTML =
     `<span class="rec ${s}"></span>${DICTATION_TEXT[s] ?? s}`;
   document.getElementById("startDictation").textContent =
     state.daemon_running ? "Save and restart dictation" : "Save and start dictation";
+  // the shortcut works only once the saved settings are running
+  const saved = state.config.dictation;
+  const hk = fmtHotkey(saved.hotkey);
+  document.getElementById("tryBox").placeholder =
+    s === "starting" ? "Loading the model…"
+    : !state.daemon_running ? "Dictation is off. Press Save and start dictation first."
+    : saved.mode === "hold" ? `Click here, then hold ${hk} while you say a sentence.`
+    : `Click here, press ${hk}, say a sentence, and press ${hk} again.`;
 }
 
 function renderPerms() {
@@ -311,6 +330,8 @@ function renderPerms() {
     };
     el.appendChild(row);
   }
+  document.querySelectorAll(".appOnly").forEach(el => { el.hidden = !perms.app_bundle; });
+  document.querySelectorAll(".srcOnly").forEach(el => { el.hidden = perms.app_bundle; });
   document.getElementById("permLead").textContent = perms.app_bundle
     ? "macOS asks you to allow each of these once."
     : "macOS asks you to allow each of these once. They go to the app you run stt from, such as your terminal.";
@@ -352,13 +373,32 @@ const setHotkey = hotkeyCapture(
   raw => { draft.dictation.hotkey = raw; render(); },
 );
 
+async function startDictation() {
+  const btn = document.getElementById("startDictation");
+  btn.disabled = starting = true;
+  renderDictation();
+  try {
+    if (!(await save())) return false;
+    const r = await post("/api/dictation/start");
+    const data = await r.json();
+    document.getElementById("dictRelaunch").hidden = !(data.error && perms.app_bundle);
+    if (data.error) { flash(data.error, true); return false; }
+    return true;
+  } finally {
+    btn.disabled = starting = false;
+    await refreshDictation();
+  }
+}
+
+document.querySelectorAll(".relaunch").forEach(b => b.onclick = async () => {
+  b.disabled = true;
+  const r = await post("/api/relaunch");
+  if (!r.ok) { b.disabled = false; return flash((await r.json()).error, true); }
+  flash("Reopening local-stt…", false);
+});
+
 document.getElementById("startDictation").onclick = async () => {
-  if (!(await save())) return;
-  const r = await post("/api/dictation/start");
-  const data = await r.json();
-  if (data.error) return flash(data.error, true);
-  await refreshDictation();
-  document.getElementById("tryBox").focus();
+  if (await startDictation()) document.getElementById("tryBox").focus();
 };
 
 document.getElementById("loginItem").onchange = async (e) => {

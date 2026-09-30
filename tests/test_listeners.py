@@ -50,3 +50,61 @@ def test_mac_keycodes_for_us_layout():
 
     assert 17 in mac_keycodes("t")
     assert {18, 83} <= mac_keycodes("1")  # main row and keypad
+
+
+def test_lone_modifier_trigger_fires_on_its_own():
+    from pynput.keyboard import Key, Listener
+
+    events = []
+    lst = PynputListener(parse_hotkey("alt_r"), lambda: events.append("on"), lambda: events.append("off"))
+    lst._listener = Listener()
+    lst._on_press(Key.alt_r)
+    lst._on_release(Key.alt_r)
+    assert events == ["on", "off"]
+
+
+def test_lone_modifier_trigger_ignores_the_other_side():
+    from pynput.keyboard import Key, KeyCode, Listener
+
+    events = []
+    lst = PynputListener(parse_hotkey("alt_r"), lambda: events.append("on"), lambda: events.append("off"))
+    lst._listener = Listener()
+    for key in (Key.alt, Key.alt_l, KeyCode.from_char("t")):
+        lst._on_press(key)
+        lst._on_release(key)
+    assert events == []
+
+
+def test_lone_modifier_with_a_held_modifier():
+    from pynput.keyboard import Key, Listener
+
+    events = []
+    lst = PynputListener(parse_hotkey("<ctrl>+alt_r"), lambda: events.append("on"), lambda: None)
+    lst._listener = Listener()
+    lst._on_press(Key.alt_r)
+    lst._on_release(Key.alt_r)
+    assert events == []
+    lst._on_press(Key.ctrl)
+    lst._on_press(Key.alt_r)
+    assert events == ["on"]
+
+
+@pytest.mark.skipif(__import__("sys").platform != "darwin", reason="macOS keyboard layout")
+def test_mac_layout_snapshot_is_read_on_the_main_thread(monkeypatch):
+    import threading
+
+    from local_stt.dictation import mac_layout
+
+    monkeypatch.setattr(mac_layout, "_layout", None)
+    errors = []
+
+    def off_main():
+        try:
+            mac_layout.use_snapshot()
+        except RuntimeError as e:
+            errors.append(e)
+
+    t = threading.Thread(target=off_main)
+    t.start()
+    t.join()
+    assert errors
