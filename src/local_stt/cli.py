@@ -229,6 +229,12 @@ def cmd_tray(args) -> int:
     return tray.main()
 
 
+def cmd_engine(args) -> int:
+    from . import helper
+
+    return helper.main()
+
+
 def cmd_settings(args) -> int:
     import time
 
@@ -355,6 +361,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sub.add_parser("tray", help="system tray app (dictation on by default)")
     t.set_defaults(func=cmd_tray)
+
+    e = sub.add_parser(
+        "engine",
+        help="the engine behind the desktop app: prints its port and token, "
+        "then serves its API until stdin closes",
+    )
+    e.set_defaults(func=cmd_engine)
 
     st = sub.add_parser("settings", help="open the settings page in a browser")
     st.set_defaults(func=cmd_settings)

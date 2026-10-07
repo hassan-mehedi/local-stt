@@ -1,6 +1,6 @@
 [project]
 name = "local-stt"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local, offline dictation and transcription for the desktop"
 requires-python = ">=3.11"
 dependencies = [
@@ -58,32 +58,11 @@ packages = ["src/local_stt"]
 [dependency-groups]
 dev = ["pytest>=8"]
 
+[tool.pytest.ini_options]
+# app/ holds a whole Python install once packaging/macos/build.sh has run
+testpaths = ["tests"]
+
 [tool.uv]
 # pynput declares evdev (its uinput backend) on Linux; it needs python3-dev
 # to compile and we only use the X11 backend — exclude it.
 override-dependencies = ["evdev; sys_platform == 'never'"]
-
-# The macOS app (packaging/macos/build.sh). Briefcase reads the dependencies
-# from [project]; this adds the bundle metadata.
-[tool.briefcase]
-project_name = "local-stt"
-bundle = "io.github.hassan-mehedi"
-url = "https://github.com/hassan-mehedi/local-stt"
-author = "hassan-mehedi"
-# Briefcase requires a license; the project has not picked one
-license = "LicenseRef-Proprietary"
-license-files = []
-
-[tool.briefcase.app.local-stt]
-formal_name = "local-stt"
-description = "Local, offline dictation and meeting transcription"
-sources = ["src/local_stt"]
-icon = "packaging/macos/icon"
-permission.microphone = "local-stt records your voice for dictation and your side of meetings. Audio never leaves this Mac."
-
-[tool.briefcase.app.local-stt.macOS]
-universal_build = false
-min_os_version = "14.2"
-# menu bar only: no Dock icon
-info."LSUIElement" = true
-info."NSAudioCaptureUsageDescription" = "local-stt records what your Mac plays, to transcribe the other side of meetings."

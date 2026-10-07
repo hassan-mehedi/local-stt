@@ -17,11 +17,13 @@ class Recorder:
 
     Opens the stream at 16kHz if the device supports it, otherwise at the
     device's native rate with soxr resampling on stop. The stream callback
-    only appends to a list — it never blocks.
+    only appends to a list — it never blocks. on_level, if given, gets each
+    block's RMS level (0..1) from the audio thread.
     """
 
-    def __init__(self, device: int | str | None = None):
+    def __init__(self, device: int | str | None = None, on_level=None):
         self.device = device
+        self.on_level = on_level
         self._stream = None
         self._frames: list[np.ndarray] = []
         self._rate = TARGET_RATE
@@ -42,7 +44,10 @@ class Recorder:
             def callback(indata, frames, time_info, status):
                 if status:
                     log.debug("capture status: %s", status)
-                self._frames.append(indata[:, 0].copy())
+                block = indata[:, 0].copy()
+                self._frames.append(block)
+                if self.on_level is not None and len(block):
+                    self.on_level(float(np.sqrt(np.mean(block * block))))
 
             try:
                 self._stream = sd.InputStream(

@@ -5,8 +5,9 @@ PynputListener — X11 (no special permissions) and macOS (needs Input
 EvdevListener  — Wayland (reads /dev/input directly; user must be in the
                  'input' group and the [wayland] extra installed).
 
-Both call on_activate() when the full combo goes down and on_deactivate()
-when the trigger key is released. Callbacks must not block.
+Both call on_activate() when the full combo goes down, on_deactivate()
+when the trigger key is released, and on_cancel() for Esc. Callbacks must
+not block.
 """
 
 from __future__ import annotations
@@ -28,10 +29,11 @@ SIDED_MODIFIERS = frozenset(
 
 
 class PynputListener:
-    def __init__(self, hotkey: Hotkey, on_activate, on_deactivate):
+    def __init__(self, hotkey: Hotkey, on_activate, on_deactivate, on_cancel=None):
         self.hotkey = hotkey
         self.on_activate = on_activate
         self.on_deactivate = on_deactivate
+        self.on_cancel = on_cancel
         self._pressed_mods: set[str] = set()
         self._trigger_down = False  # edge detection: X auto-repeat resends presses
         self._listener = None
@@ -75,6 +77,10 @@ class PynputListener:
         return False
 
     def _on_press(self, key):
+        from pynput.keyboard import Key
+
+        if key == Key.esc and self.on_cancel is not None:
+            self.on_cancel()
         if self._is_trigger(key):
             if self._trigger_down:
                 return  # auto-repeat
@@ -208,7 +214,7 @@ class EvdevListener:
         "KEY_LEFTSHIFT": "shift", "KEY_RIGHTSHIFT": "shift",
     }
 
-    def __init__(self, hotkey: Hotkey, on_activate, on_deactivate):
+    def __init__(self, hotkey: Hotkey, on_activate, on_deactivate, on_cancel=None):
         try:
             import evdev  # noqa: F401
         except ImportError:
@@ -221,6 +227,7 @@ class EvdevListener:
         self.hotkey = hotkey
         self.on_activate = on_activate
         self.on_deactivate = on_deactivate
+        self.on_cancel = on_cancel
         self._trigger_code = self._resolve_trigger(hotkey.trigger)
         self._pressed_mods: set[str] = set()
         self._stop = threading.Event()
@@ -287,6 +294,8 @@ class EvdevListener:
         if mod:
             (self._pressed_mods.add if pressed else self._pressed_mods.discard)(mod)
             return
+        if name == "KEY_ESC" and pressed and self.on_cancel is not None:
+            self.on_cancel()
         if code == self._trigger_code:
             if pressed and self.hotkey.modifiers <= self._pressed_mods:
                 self.on_activate()
@@ -315,12 +324,12 @@ def is_wayland() -> bool:
     )
 
 
-def make_listener(kind: str, hotkey: Hotkey, on_activate, on_deactivate):
+def make_listener(kind: str, hotkey: Hotkey, on_activate, on_deactivate, on_cancel=None):
     """kind: 'auto' | 'pynput' | 'evdev'."""
     if kind == "auto":
         kind = "evdev" if is_wayland() else "pynput"
     if kind == "pynput":
-        return PynputListener(hotkey, on_activate, on_deactivate)
+        return PynputListener(hotkey, on_activate, on_deactivate, on_cancel)
     if kind == "evdev":
-        return EvdevListener(hotkey, on_activate, on_deactivate)
+        return EvdevListener(hotkey, on_activate, on_deactivate, on_cancel)
     raise ValueError(f"Unknown listener: {kind!r} (expected auto, pynput, or evdev)")

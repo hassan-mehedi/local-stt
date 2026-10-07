@@ -10,6 +10,7 @@ import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -29,15 +30,33 @@ def _notify(summary: str, body: str = "") -> None:
     notify(summary, body, timeout_ms=1200)
 
 
+@dataclass
+class Utterance:
+    """What the worker hands to on_text after a transcription."""
+
+    text: str
+    pcm: np.ndarray
+    elapsed_ms: int
+    app: object = None  # whatever front_app() returned when recording began
+    error: str | None = None  # set when typing the text failed
+
+
 class DictationDaemon:
-    def __init__(self, config: Config, backend: AsrBackend, on_state=None):
+    def __init__(
+        self, config: Config, backend: AsrBackend, on_state=None, *,
+        on_level=None, on_text=None, transform=None, front_app=None,
+    ):
         self.config = config
         self.backend = backend
         self.hotkey: Hotkey = parse_hotkey(config.dictation.hotkey)
         self.output = make_output(config.dictation.output)
-        self.recorder = Recorder()
+        self.recorder = Recorder(on_level=on_level)
         self.on_state = on_state  # optional callback: 'idle'|'recording'|'transcribing'
-        self._queue: queue.Queue[np.ndarray | None] = queue.Queue()
+        self.on_text = on_text  # optional callback(Utterance), after the text is emitted
+        self.transform = transform  # optional str -> str, e.g. the dictionary
+        self.front_app = front_app  # optional () -> app, read when recording begins
+        self._app = None
+        self._queue: queue.Queue[tuple[np.ndarray, object] | None] = queue.Queue()
         self._listener = None
         self._worker: threading.Thread | None = None
         # guards the start/stop transition (the cap timer fires from its own
@@ -66,10 +85,31 @@ class DictationDaemon:
         if self.config.dictation.mode == "hold":
             self._end_utterance()
 
+    def toggle_utterance(self) -> None:
+        """Start or stop a recording whatever the mode, e.g. from a click."""
+        if self.recorder.recording:
+            self._end_utterance()
+        else:
+            self._begin_utterance()
+
+    def cancel_utterance(self) -> bool:
+        """Throw the current recording away. False if nothing was recording."""
+        with self._utt_lock:
+            if not self.recorder.recording:
+                return False
+            if self._cap_timer is not None:
+                self._cap_timer.cancel()
+                self._cap_timer = None
+            self.recorder.stop()
+        log.info("recording cancelled")
+        self._state("idle")
+        return True
+
     def _begin_utterance(self) -> None:
         with self._utt_lock:
             if self.recorder.recording:
                 return
+            self._app = self._read_front_app()
             self.recorder.start()
             self._arm_cap_timer()
         log.info("recording...")
@@ -81,6 +121,15 @@ class DictationDaemon:
                 else ""
             )
             _notify("● Recording", body)
+
+    def _read_front_app(self):
+        if self.front_app is None:
+            return None
+        try:
+            return self.front_app()
+        except Exception:
+            log.exception("reading the front app failed")
+            return None
 
     def _arm_cap_timer(self) -> None:
         """In toggle mode, auto-stop after max_duration_ms so a forgotten
@@ -112,7 +161,7 @@ class DictationDaemon:
             return
         log.info("captured %.1fs, transcribing...", ms / 1000)
         self._state("transcribing")
-        self._queue.put(pcm)
+        self._queue.put((pcm, self._app))
 
     # -- worker -----------------------------------------------------------------
 
@@ -122,9 +171,10 @@ class DictationDaemon:
             vad_min_silence_ms=250,  # dictation: split on short pauses
         )
         while True:
-            pcm = self._queue.get()
-            if pcm is None:
+            item = self._queue.get()
+            if item is None:
                 return
+            pcm, app = item
             t0 = time.monotonic()
             try:
                 transcript = self.backend.transcribe_audio(pcm, 16000, opts)
@@ -132,9 +182,7 @@ class DictationDaemon:
                 log.exception("transcription failed")
                 self._state("idle")
                 continue
-            text = postprocess(
-                transcript.text, append_space=self.config.dictation.append_space
-            )
+            text = self._finish_text(transcript.text)
             elapsed = time.monotonic() - t0
             self._state("idle")
             if not text.strip():
@@ -143,10 +191,28 @@ class DictationDaemon:
             log.info("(%.2fs) %s", elapsed, text.strip())
             if self.config.dictation.notify:
                 _notify("✓ " + text.strip()[:80])
+            error = None
             try:
                 self.output.emit(text)
-            except Exception:
+            except Exception as e:
                 log.exception("failed to emit text")
+                error = str(e)
+            if self.on_text:
+                try:
+                    self.on_text(Utterance(text, pcm, round(elapsed * 1000), app, error))
+                except Exception:
+                    log.exception("text callback failed")
+
+    def _finish_text(self, raw: str) -> str:
+        text = postprocess(raw, append_space=False)
+        if self.transform and text:
+            try:
+                text = self.transform(text)
+            except Exception:
+                log.exception("dictionary failed; typing the text as heard")
+        if text.strip() and self.config.dictation.append_space:
+            text += " "
+        return text
 
     # -- lifecycle ----------------------------------------------------------------
 
@@ -159,6 +225,7 @@ class DictationDaemon:
             self.hotkey,
             on_activate=self._on_activate,
             on_deactivate=self._on_deactivate,
+            on_cancel=self.cancel_utterance,
         )
         self._listener.start()
         log.info("loading model %s...", self.config.model.name)

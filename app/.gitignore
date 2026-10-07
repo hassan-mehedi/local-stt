@@ -1,0 +1,7 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+# filled by packaging/macos/build.sh
+src-tauri/engine/*
+!src-tauri/engine/.gitkeep

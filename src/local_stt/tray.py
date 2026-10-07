@@ -84,6 +84,10 @@ class TrayApp:
     def dictation_on(self) -> bool:
         return self._daemon is not None
 
+    def _daemon_hooks(self) -> dict:
+        """Extra DictationDaemon callbacks; the desktop app's engine adds some."""
+        return {}
+
     def _start_daemon_locked(self, notify: bool = True) -> str | None:
         """Returns an error message if the daemon failed to start."""
         from .cli import _build_backend
@@ -92,7 +96,9 @@ class TrayApp:
         backend = daemon = None
         try:
             backend = _build_backend(self.config)
-            daemon = DictationDaemon(self.config, backend, on_state=self._on_dictation_state)
+            daemon = DictationDaemon(
+                self.config, backend, on_state=self._on_dictation_state, **self._daemon_hooks()
+            )
             daemon.start()
         except Exception as e:
             log.exception("failed to start dictation")
@@ -175,9 +181,10 @@ class TrayApp:
     def meeting_on(self) -> bool:
         return self._meeting is not None
 
-    def toggle_meeting(self, language: str | None = None) -> None:
+    def toggle_meeting(self, language: str | None = None) -> str | None:
         """Start a meeting (in `language`, default from config), or stop the
-        running one whichever menu item was used."""
+        running one whichever menu item was used. Returns an error message
+        if the meeting failed to start."""
         with self._lock:
             if self._meeting is None:
                 from .meeting.recorder import MeetingRecorder
@@ -194,7 +201,7 @@ class TrayApp:
                 except Exception as e:
                     log.exception("failed to start meeting")
                     _notify("Meeting failed", str(e))
-                    return
+                    return str(e)
                 self._meeting = rec
                 self._set_state("recording")
                 _notify("Meeting recording", str(rec.session_dir))
@@ -207,6 +214,7 @@ class TrayApp:
                     target=self._transcribe_meeting, args=(rec,), daemon=True
                 ).start()
         self._refresh()
+        return None
 
     def _transcribe_meeting(self, rec) -> None:
         try:

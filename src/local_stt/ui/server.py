@@ -3,12 +3,18 @@
 Bound to 127.0.0.1 with a per-session token. The tray passes a `controller`
 exposing live actions (daemon status/restart, model download/switch); without
 one, the server still edits config.toml (the page shows "daemon: off").
+
+The desktop app's engine also gives the controller a history store and an
+event bus, which turns on the routes in app_api and the /api/events stream.
+Its window loads from another origin, so those replies carry CORS headers.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import queue
+import re
 import secrets
 import socketserver
 import sys
@@ -30,9 +36,13 @@ from ..config import (
 )
 from ..desktop import app_bundle
 from ..engine import models
+from . import app_api
 from .state import clear_state, write_state
 
 log = logging.getLogger(__name__)
+
+# the Tauri window on macOS and Linux/Windows, and its dev server
+APP_ORIGINS = frozenset({"tauri://localhost", "http://tauri.localhost", "http://localhost:1420"})
 
 STATIC_DIR = Path(__file__).parent / "static"
 PAGES = {"/": "settings.html", "/onboarding": "onboarding.html"}
@@ -44,6 +54,15 @@ ASSETS = {
 class Controller:
     """Interface the tray implements for live actions. The default no-op
     version is used when the page runs without a tray (config-only)."""
+
+    store = None  # store.Store, for the app routes
+    events = None  # events.EventBus, for /api/events
+
+    def extra_state(self) -> dict:
+        return {}
+
+    def publish_state(self) -> None:
+        """Sends the current state to /api/events listeners."""
 
     def daemon_running(self) -> bool:
         return False
@@ -98,6 +117,7 @@ def build_state(controller: Controller) -> dict:
             name: models.download_progress(name)
             for name, s in downloading.items() if s == "running"
         },
+        **controller.extra_state(),
     }
 
 
@@ -182,13 +202,93 @@ def make_handler(token: str, controller: Controller):
                 (q.get("token", [""])[0] or header or ""), token
             )
 
+        def _cors(self):
+            origin = self.headers.get("Origin")
+            if origin in APP_ORIGINS:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+
         def _send_json(self, obj, status=200):
             body = json.dumps(obj).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            self._cors()
             self.end_headers()
             self.wfile.write(body)
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._cors()
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "X-Token, Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.end_headers()
+
+        def _send_file_reply(self, reply: app_api.FileReply):
+            """Byte ranges included: WebKit only plays audio served with them."""
+            size = reply.path.stat().st_size
+            start, end = 0, size - 1
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
+            if match and (match.group(1) or match.group(2)):
+                if match.group(1):
+                    start = int(match.group(1))
+                    end = min(int(match.group(2)), size - 1) if match.group(2) else size - 1
+                else:
+                    start = max(0, size - int(match.group(2)))
+                if start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self._cors()
+                    self.end_headers()
+                    return
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            else:
+                self.send_response(200)
+            self.send_header("Content-Type", reply.content_type)
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self._cors()
+            self.end_headers()
+            with open(reply.path, "rb") as f:
+                f.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = f.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+
+        def _stream_events(self):
+            events = controller.events.subscribe()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(b"retry: 1000\n\n")
+                self.wfile.flush()
+                controller.publish_state()
+                while True:
+                    try:
+                        message = events.get(timeout=15)
+                    except queue.Empty:
+                        message = b": ping\n\n"
+                    self.wfile.write(message)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                controller.events.unsubscribe(events)
+
+        def _reply(self, result):
+            if isinstance(result, app_api.FileReply):
+                return self._send_file_reply(result)
+            return self._send_json(result)
 
         def _read_json(self) -> dict:
             length = int(self.headers.get("Content-Length", 0))
@@ -210,6 +310,20 @@ def make_handler(token: str, controller: Controller):
                 return self._send_json(build_state(controller))
             if path == "/api/permissions":
                 return self._send_json(permissions_state())
+            if path == "/api/events" and controller.events is not None:
+                return self._stream_events()
+            if controller.store is not None:
+                try:
+                    result = app_api.handle_get(controller, path, parse_qs(urlparse(self.path).query))
+                except LookupError as e:
+                    return self._send_json({"error": str(e)}, 404)
+                except ValueError as e:
+                    return self._send_json({"error": str(e)}, 400)
+                except Exception as e:
+                    log.exception("API error")
+                    return self._send_json({"error": str(e)}, 500)
+                if result is not None:
+                    return self._reply(result)
             return self._send_json({"error": "not found"}, 404)
 
         def do_POST(self):
@@ -246,6 +360,12 @@ def make_handler(token: str, controller: Controller):
                 if path == "/api/onboarding/done":
                     controller.finish_onboarding()
                     return self._send_json({"ok": True})
+                if controller.store is not None:
+                    result = app_api.handle_post(controller, path, self._read_json())
+                    if result is not None:
+                        return self._send_json(result)
+            except LookupError as e:
+                return self._send_json({"error": str(e)}, 404)
             except ValueError as e:  # ConfigError, unknown model, bad JSON
                 return self._send_json({"error": str(e)}, 400)
             except Exception as e:

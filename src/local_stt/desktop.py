@@ -24,8 +24,21 @@ def notify_command(summary: str, body: str = "", timeout_ms: int = 2500) -> list
     return None
 
 
+_notify_handler = None
+
+
+def set_notify_handler(handler) -> None:
+    """Sends notify() calls to handler(summary, body) instead of the desktop.
+    The app window shows them itself."""
+    global _notify_handler
+    _notify_handler = handler
+
+
 def notify(summary: str, body: str = "", timeout_ms: int = 2500) -> None:
     """Fire-and-forget; macOS ignores the timeout."""
+    if _notify_handler is not None:
+        _notify_handler(summary, body)
+        return
     cmd = notify_command(summary, body, timeout_ms)
     if cmd:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -35,6 +48,20 @@ def open_target(target: str) -> None:
     """Open a folder, file or URL with the default app."""
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     subprocess.Popen([opener, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def front_app():
+    """The app in front, as a store.FrontApp, or None where unknown."""
+    if sys.platform != "darwin":
+        return None
+    from AppKit import NSWorkspace
+
+    from .store import FrontApp
+
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    if app is None:
+        return None
+    return FrontApp(bundle_id=app.bundleIdentifier(), name=app.localizedName())
 
 
 def app_bundle() -> Path | None:

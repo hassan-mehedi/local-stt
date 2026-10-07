@@ -35,9 +35,10 @@ def choose_model(cfg, model: str | None = None, language: str | None = None) -> 
     return model, language
 
 
-def save_settings(session_dir: Path, model: str, language: str) -> None:
+def save_settings(session_dir: Path, model: str, language: str, **extra) -> None:
+    """extra: e.g. title and started_at, which the app shows."""
     (session_dir / SETTINGS_FILE).write_text(
-        json.dumps({"model": model, "language": language}, indent=2) + "\n"
+        json.dumps({"model": model, "language": language, **extra}, indent=2) + "\n"
     )
 
 

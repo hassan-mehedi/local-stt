@@ -107,15 +107,17 @@ Only one tray runs at a time — the service plus a manual `stt tray` won't doub
 
 ### Install the app
 
-Build the DMG once (needs uv and the Xcode command line tools, about 3 minutes):
+Build the DMG once. It needs uv, [pnpm](https://pnpm.io), [Rust](https://rustup.rs) and the Xcode command line tools, and takes about 5 minutes:
 
 ```bash
-./packaging/macos/build.sh    # writes dist/local-stt-0.1.0.dmg
+./packaging/macos/build.sh    # writes dist/local-stt-0.2.0.dmg
 ```
 
-Open the DMG and drag local-stt into Applications. On first launch a setup window walks you through the permissions, the model download, your shortcut and meetings. Run it again any time from the menu: **Setup guide…**.
+Open the DMG and drag local-stt into Applications. On first launch a setup window walks you through the model download, the microphone, the two keyboard permissions and a test dictation. The app is a Tauri window around the same engine (`stt engine`), which runs inside the bundle.
 
-The app is ad-hoc signed, because there is no Apple developer certificate. It opens without a warning on the Mac that built it. On another Mac, right-click it and pick **Open** the first time. macOS also forgets the app's permissions after each rebuild, so the setup guide asks again.
+While you dictate, a pill at the bottom of the screen shows the mic level; X or Esc throws the clip away. Home keeps every dictation with its recording until you delete it, Meetings plays and searches transcripts, Insights counts words, and Dictionary fixes spellings and expands phrases.
+
+**Signing.** There is no Apple developer certificate, so `build.sh` signs with a self-signed identity named "local-stt Dev" from your login keychain if there is one, and ad hoc otherwise. Use the self-signed identity: macOS only passes the Accessibility permission on to the engine, and only keeps permissions across rebuilds, when the signature stays the same. Create it in Keychain Access (Certificate Assistant > Create a Certificate, type Code Signing) or with openssl. On another Mac, right-click the app and pick **Open** the first time.
 
 The app has no `stt` command and can't convert `bengali-whisper-medium` (that needs torch). Use the source install below for both; the app picks up models downloaded there.
 
@@ -131,7 +133,7 @@ A mic icon appears in the menu bar: slashed = off, plain = listening, red = reco
 
 ### Permissions
 
-The setup guide asks for each one. Grant them to local-stt.app, or for a source install to the app that runs `stt`: your terminal when you run it by hand, or the Python binary named in the error message when it runs as a login agent. Restart local-stt after granting.
+The setup window asks for each one. Grant them to local-stt.app, or for a source install to the app that runs `stt`: your terminal when you run it by hand, or the Python binary named in the error message when it runs as a login agent. Restart local-stt after granting.
 
 | Permission (System Settings > Privacy & Security) | Needed for |
 |---|---|

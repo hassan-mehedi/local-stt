@@ -87,3 +87,41 @@ def test_auto_stop_and_manual_stop_dont_double_queue(monkeypatch):
     d._auto_stop()
     d._on_activate()  # user presses after auto-stop already fired
     assert d._queue.qsize() == 1
+
+
+def test_cancel_discards_the_recording(monkeypatch):
+    d = _daemon(monkeypatch, "toggle")
+    states = []
+    d.on_state = states.append
+    d._on_activate()
+    assert d.cancel_utterance()
+    assert not d.recorder.recording
+    assert d._queue.qsize() == 0
+    assert states[-1] == "idle"
+    assert not d.cancel_utterance()  # nothing left to cancel
+
+
+def test_toggle_utterance_works_in_hold_mode(monkeypatch):
+    d = _daemon(monkeypatch, "hold")
+    d.toggle_utterance()
+    assert d.recorder.recording
+    d.toggle_utterance()
+    assert not d.recorder.recording
+    assert d._queue.qsize() == 1
+
+
+def test_front_app_travels_with_the_utterance(monkeypatch):
+    d = _daemon(monkeypatch, "toggle")
+    d.front_app = lambda: "Slack"
+    d._on_activate()
+    d._on_activate()
+    _, app = d._queue.get_nowait()
+    assert app == "Slack"
+
+
+def test_finish_text_applies_transform_before_the_space(monkeypatch):
+    d = _daemon(monkeypatch, "toggle")
+    d.transform = lambda text: text.replace("gonna", "going to")
+    assert d._finish_text("  I'm   gonna go ") == "I'm going to go "
+    d.transform = lambda text: 1 / 0
+    assert d._finish_text("kept as heard") == "kept as heard "
