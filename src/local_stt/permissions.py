@@ -1,9 +1,5 @@
-"""macOS privacy permissions: current status, asking for each one, and start
-at login. Each status is "granted", "denied", "not_asked" or "unknown".
-
-macOS grants these to the app that runs stt: local-stt.app, or the terminal
-for a source install.
-"""
+"""macOS privacy permissions and start at login. Status is "granted", "denied",
+"not_asked" or "unknown", for the app running stt (local-stt.app or a terminal)."""
 
 from __future__ import annotations
 
@@ -140,8 +136,6 @@ def _accessibility() -> str:
     # again only gets the prompt, which leads to the same pane
     return "granted" if HIServices.AXIsProcessTrusted() else "not_asked"
 
-
-# -- start at login -------------------------------------------------------------
 
 
 def login_item() -> dict:

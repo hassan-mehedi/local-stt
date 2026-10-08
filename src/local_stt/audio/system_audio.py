@@ -1,9 +1,5 @@
-"""System-audio (speaker/sink) and mic capture via pw-record.
-
-Both meeting tracks use pw-record subprocesses: they share PipeWire's clock
-(no drift between tracks) and stream straight to disk (crash-safe for
-hour-long recordings). Recorded at 16kHz mono s16 — what Whisper needs.
-"""
+"""Meeting tracks on Linux via pw-record: both share PipeWire's clock, so they do
+not drift, and stream to disk as 16 kHz mono s16 WAV."""
 
 from __future__ import annotations
 
@@ -36,8 +32,8 @@ class PwRecorder:
         if self.capture_sink:
             cmd += ["-P", "{ stream.capture.sink = true }"]
         cmd.append(str(self.dest))
-        # start_new_session: terminal Ctrl+C must not reach pw-record —
-        # shutdown is owned by stop(), not the terminal's process group.
+        # start_new_session: a terminal Ctrl+C must not reach pw-record; stop()
+        # owns its shutdown, not the terminal's process group.
         self._proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -62,7 +58,7 @@ class PwRecorder:
                 self._proc.wait()
         elif self._wav_is_valid():
             # exited before stop() (e.g. a stray SIGINT) but finalized a
-            # readable recording — pw-record exits 1 on SIGINT, so the file
+            # readable recording. pw-record exits 1 on SIGINT, so the file
             # is the only reliable signal of success
             log.warning(
                 "pw-record for %s exited before stop() (rc=%s); recording kept",

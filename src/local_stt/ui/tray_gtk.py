@@ -1,9 +1,5 @@
-"""Linux tray shell: Ayatana AppIndicator via the system PyGObject.
-
-The isolated uv venv has no `gi`, but the system one is ABI-compatible — we
-append dist-packages to sys.path so it's importable without shadowing venv
-packages.
-"""
+"""Linux tray shell: Ayatana AppIndicator via the system PyGObject, put on
+sys.path after the venv's packages, since the venv has no `gi`."""
 
 from __future__ import annotations
 

@@ -21,7 +21,7 @@ dependencies = [
     "pyobjc-framework-ServiceManagement>=11; sys_platform == 'darwin'",
 ]
 # Note: the tray uses the system PyGObject + Ayatana AppIndicator (GTK3),
-# not a pip package — see tray._load_gi(). On Mint these ship preinstalled
+# not a pip package; see ui.tray_gtk._load_gi(). On Mint these ship preinstalled
 # (gir1.2-ayatanaappindicator3-0.1).
 
 [project.optional-dependencies]
@@ -62,7 +62,20 @@ dev = ["pytest>=8"]
 # app/ holds a whole Python install once packaging/macos/build.sh has run
 testpaths = ["tests"]
 
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "C901", "BLE001", "T20"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.ruff.lint.per-file-ignores]
+# command line output, and the engine's port/token line for the app
+"src/local_stt/cli.py" = ["T201"]
+"src/local_stt/headless.py" = ["T201"]
+"app/scripts/*" = ["T201"]
+"packaging/*" = ["T201"]
+
 [tool.uv]
 # pynput declares evdev (its uinput backend) on Linux; it needs python3-dev
-# to compile and we only use the X11 backend — exclude it.
+# to compile and we only use the X11 backend, so exclude it.
 override-dependencies = ["evdev; sys_platform == 'never'"]

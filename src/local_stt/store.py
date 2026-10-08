@@ -1,8 +1,5 @@
-"""Dictation history and the personal dictionary, in one SQLite file.
-
-History rows are kept until deleted one by one. Each row may have the
-recorded clip next to the database as audio/<id>.wav (16 kHz mono, 16-bit).
-"""
+"""Dictation history and the personal dictionary in one SQLite file. A row's clip,
+if kept, is audio/<id>.wav next to it (16 kHz mono, 16-bit)."""
 
 from __future__ import annotations
 
@@ -81,8 +78,6 @@ class Store:
         with self._lock, self._db:
             return self._db.execute(sql, args).lastrowid
 
-    # -- history -------------------------------------------------------------
-
     def add_dictation(
         self,
         text: str,
@@ -142,8 +137,6 @@ class Store:
             deleted = self._db.execute("DELETE FROM dictations WHERE id = ?", (row_id,)).rowcount
         self.audio_path(row_id).unlink(missing_ok=True)
         return bool(deleted)
-
-    # -- stats ---------------------------------------------------------------
 
     def _days(self, since: float | None = None) -> dict[date, dict]:
         """Per local day: words and audio milliseconds."""
@@ -265,8 +258,6 @@ class Store:
             "apps": apps,
         }
 
-    # -- dictionary ------------------------------------------------------------
-
     def dictionary(self) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {kind: [] for kind in DICTIONARY_KINDS}
         for r in self._query("SELECT * FROM dictionary ORDER BY created_at, id"):
@@ -299,8 +290,6 @@ class Store:
     def apply_dictionary(self, text: str) -> str:
         return apply_dictionary(text, self.dictionary())
 
-
-# -- applying the dictionary -------------------------------------------------------
 
 _TOKEN = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+|[^\W\d_]+")
 

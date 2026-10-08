@@ -1,8 +1,5 @@
 """macOS menu bar shell: an AppKit status item with SF Symbol icons.
-
-AppKit must only be touched from the main thread, so set_state() and
-refresh() hop there with AppHelper.callAfter.
-"""
+set_state() and refresh() hop to the main thread, as AppKit requires."""
 
 from __future__ import annotations
 
@@ -132,9 +129,8 @@ class MacShell:
             AppHelper.callAfter(self._window.close)
 
     def run(self, on_signal) -> None:
-        """on_signal runs for Ctrl+C and for launchd's SIGTERM. Python's own
-        signal handlers can't fire while AppKit owns the main thread; these
-        wake the run loop through a Mach port instead."""
+        """Python signal handlers can't fire while AppKit owns the main thread, so a
+        Mach port wakes the run loop for Ctrl+C and launchd's SIGTERM."""
         from PyObjCTools import MachSignals
 
         for signum in (signal.SIGINT, signal.SIGTERM):

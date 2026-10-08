@@ -1,9 +1,5 @@
-"""Render modern tray icons to PNG files for AppIndicator.
-
-Symbolic-style white mic to match the panel's other status icons, with a
-small colored status dot (green idle / red recording / amber transcribing).
-Off = dimmed mic, no dot. Drawn at high res and downscaled for crisp edges.
-"""
+"""Tray icon PNGs for AppIndicator: a white mic with a status dot (green idle,
+red recording, amber transcribing), drawn large and downscaled."""
 
 from __future__ import annotations
 

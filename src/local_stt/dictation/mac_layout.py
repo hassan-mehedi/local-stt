@@ -1,9 +1,5 @@
-"""pynput reads the keyboard layout through Text Input Sources. Once a window
-with a text field is open, macOS traps the process when those calls run off
-the main thread, and the tray starts dictation on a worker thread. So the
-layout is read once on the main thread and pynput reuses that copy. A layout
-switched to later takes effect after a restart.
-"""
+"""pynput's keyboard layout, read once on the main thread: macOS traps those
+calls off the main thread once a text field is open. New layouts need a restart."""
 
 from __future__ import annotations
 

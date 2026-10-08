@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import glob
+import logging
 import os
 import platform
 import shutil
@@ -12,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import MODELS_DIR
+
+log = logging.getLogger(__name__)
 
 WHISPER = "whisper"
 PARAKEET = "parakeet"
@@ -186,11 +189,8 @@ def remove(name: str) -> None:
 
 
 def preload_cuda_libraries() -> None:
-    """Load cuBLAS/cuDNN shared libraries from pip-installed NVIDIA packages.
-
-    ctranslate2 dlopens these at runtime; without this, CUDA inference fails
-    unless the libs are on LD_LIBRARY_PATH. Safe no-op if packages are absent.
-    """
+    """Loads cuBLAS/cuDNN from the pip NVIDIA packages, which ctranslate2 dlopens;
+    otherwise they must be on LD_LIBRARY_PATH. No-op if the packages are absent."""
     lib_dirs = []
     for pkg in ("nvidia.cublas.lib", "nvidia.cudnn.lib"):
         try:
@@ -211,5 +211,8 @@ def cuda_available() -> bool:
         import ctranslate2
 
         return ctranslate2.get_cuda_device_count() > 0
+    except ImportError:
+        return False
     except Exception:
+        log.exception("CUDA check failed; using the CPU")
         return False

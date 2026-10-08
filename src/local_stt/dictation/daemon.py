@@ -1,8 +1,5 @@
-"""Dictation daemon: hold hotkey -> record -> transcribe -> emit text.
-
-Listener callbacks never block on inference: the utterance is handed to a
-worker thread via a queue, and utterances are emitted in order.
-"""
+"""Dictation daemon: hotkey -> record -> transcribe -> type. Listener callbacks
+hand each utterance to a worker thread, so they never wait on inference."""
 
 from __future__ import annotations
 
@@ -70,8 +67,6 @@ class DictationDaemon:
                 self.on_state(state)
             except Exception:
                 log.exception("state callback failed")
-
-    # -- listener callbacks (must stay fast; never block) -----------------------
 
     def _on_activate(self) -> None:
         """Combo pressed. hold: start recording; toggle: flip start/stop."""
@@ -163,8 +158,6 @@ class DictationDaemon:
         self._state("transcribing")
         self._queue.put((pcm, self._app))
 
-    # -- worker -----------------------------------------------------------------
-
     def _worker_loop(self):
         opts = TranscribeOptions(
             language=self.config.model.language or None,
@@ -214,12 +207,9 @@ class DictationDaemon:
             text += " "
         return text
 
-    # -- lifecycle ----------------------------------------------------------------
-
     def start(self) -> None:
-        """Non-blocking: start the key listener, load the model, start the
-        worker. The listener goes first so a missing permission shows up
-        before a model load. A shortcut pressed during the load is queued."""
+        """Non-blocking. The listener starts first, so a missing permission shows up
+        before the model load; a shortcut pressed during the load is queued."""
         self._listener = make_listener(
             self.config.dictation.listener,
             self.hotkey,
@@ -235,7 +225,7 @@ class DictationDaemon:
             np.zeros(8000, dtype=np.float32), 16000, TranscribeOptions()
         )
         verb = "hold" if self.config.dictation.mode == "hold" else "press"
-        log.info("ready — %s %s to dictate", verb, self.config.dictation.hotkey)
+        log.info("ready: %s %s to dictate", verb, self.config.dictation.hotkey)
 
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()

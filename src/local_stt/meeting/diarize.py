@@ -1,9 +1,5 @@
-"""Optional speaker diarization (pyannote) for the 'Them' track.
-
-Splits the remote side of a meeting into 'Them 1', 'Them 2', ... in group
-calls. Heavy optional dependency — install with the [diarize] extra; needs a
-HuggingFace token with the gated pyannote models accepted.
-"""
+"""Optional pyannote diarization of the 'Them' track into 'Them 1', 'Them 2', ...
+Needs the [diarize] extra and a HuggingFace token with the gated models accepted."""
 
 from __future__ import annotations
 
@@ -62,7 +58,7 @@ def diarize_wav(path: Path, hf_token: str | None = None) -> list[Turn]:
         if torch.cuda.is_available():
             pipeline.to(torch.device("cuda"))
     except Exception:
-        log.warning("could not move diarization to GPU; using CPU")
+        log.warning("could not move diarization to GPU; using CPU", exc_info=True)
 
     output = pipeline(str(path))
     # exclusive diarization allows one speaker at a time, which maps cleanly
@@ -79,15 +75,10 @@ def diarize_wav(path: Path, hf_token: str | None = None) -> list[Turn]:
 def assign_speakers(
     segments: list[Segment], turns: list[Turn], prefix: str = "Them"
 ) -> list[Segment]:
-    """Relabel segments by max time-overlap with diarization turns.
-
-    Speakers are numbered by order of first appearance. If diarization found
-    a single speaker (or nothing), the original labels stay.
-
-    Pure logic — unit-testable without pyannote.
-    """
-    raw_labels = sorted({t.label for t in turns}, key=lambda l: min(
-        t.start for t in turns if t.label == l
+    """Relabels segments by largest overlap with the turns, numbered by first
+    appearance. With one speaker or none, the original labels stay."""
+    raw_labels = sorted({t.label for t in turns}, key=lambda label: min(
+        t.start for t in turns if t.label == label
     ))
     if len(raw_labels) < 2:
         return segments

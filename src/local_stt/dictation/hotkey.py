@@ -1,8 +1,5 @@
-"""Hotkey string parsing: '<alt>+t' -> (modifiers, trigger key).
-
-Parsing is pynput-free so it can be unit-tested headlessly; resolution to
-pynput key objects happens in the daemon.
-"""
+"""Hotkey string parsing: '<alt>+t' -> (modifiers, trigger key). Kept free of
+pynput so tests run headless; the daemon resolves the pynput keys."""
 
 from __future__ import annotations
 

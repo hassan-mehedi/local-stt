@@ -1,11 +1,11 @@
 # local-stt
 
-Local, offline speech-to-text for Linux and macOS (Apple Silicon). Press a hotkey, speak, press again — the text appears in whatever app has focus. Also transcribes audio/video files and records meetings (your mic + the other side) with speaker labels. Everything runs on your machine: no cloud, no account, no telemetry.
+Local, offline speech-to-text for Linux and macOS (Apple Silicon). Press a hotkey, speak, press again, and the text appears in whatever app has focus. Also transcribes audio/video files and records meetings (your mic + the other side) with speaker labels. Everything runs on your machine: no cloud, no account, no telemetry.
 
-- **Dictation** — global hotkey toggles recording; transcribes and types into the focused window.
-- **File transcription** — any audio/video → `txt` / `md` / `srt` / `vtt` / `json`.
-- **Meetings** — records mic ("Me") and system audio ("Them") as separate tracks, transcribes and merges them. Optional speaker diarization.
-- **Tray app** — status icon + menu, with a browser-based settings page (switch models, rebind the hotkey, manage downloads).
+- **Dictation**: global hotkey toggles recording; transcribes and types into the focused window.
+- **File transcription**: any audio/video → `txt` / `md` / `srt` / `vtt` / `json`.
+- **Meetings**: records mic ("Me") and system audio ("Them") as separate tracks, transcribes and merges them. Optional speaker diarization.
+- **Tray app**: status icon + menu, with a browser-based settings page (switch models, rebind the hotkey, manage downloads).
 
 Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2), which uses your NVIDIA GPU if present and falls back to CPU. On Apple Silicon the default is NVIDIA Parakeet via [parakeet-mlx](https://github.com/senstella/parakeet-mlx), which runs on the Mac's GPU.
 
@@ -15,10 +15,10 @@ On a Mac, skip to [macOS](#macos-apple-silicon); the sections before it are for 
 
 ## Requirements
 
-- **Linux on X11.** Tested on Linux Mint / Cinnamon. (Wayland support exists but is unverified — see [below](#wayland).)
+- **Linux on X11.** Tested on Linux Mint / Cinnamon. (Wayland support exists but is unverified; see [below](#wayland).)
 - **Python 3.11+**
-- **NVIDIA GPU (optional but recommended).** Needs a recent proprietary driver. Without one it runs on CPU — fine for file transcription, slow for dictation. No CUDA toolkit needed; the CUDA libraries install via pip.
-- **[uv](https://docs.astral.sh/uv/)** — the Python project/installer used here:
+- **NVIDIA GPU (optional but recommended).** Needs a recent proprietary driver. Without one it runs on the CPU, which is fine for file transcription and slow for dictation. No CUDA toolkit needed; the CUDA libraries install via pip.
+- **[uv](https://docs.astral.sh/uv/)**, the Python project manager and installer used here:
   ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
@@ -39,7 +39,7 @@ sudo apt install ffmpeg xdotool xclip libnotify-bin pipewire-bin \
 | `pipewire-bin` | meeting recording (`pw-record`) |
 | `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-ayatanaappindicator3-0.1` | the tray icon (system PyGObject + Ayatana AppIndicator) |
 
-> The tray uses your **system** PyGObject, not a pip package — these GObject-introspection packages are required for the tray icon to appear. On Mint they're usually preinstalled.
+> The tray uses your **system** PyGObject, not a pip package. These GObject-introspection packages are required for the tray icon to appear. On Mint they're usually preinstalled.
 
 ---
 
@@ -56,7 +56,7 @@ uv tool install --editable '.[cuda]' --overrides overrides.txt
 stt models download large-v3-turbo
 ```
 
-`stt` is now on your PATH. (The `--overrides overrides.txt` flag skips an optional Linux build dependency that's only needed for Wayland — see [below](#wayland).)
+`stt` is now on your PATH. (The `--overrides overrides.txt` flag skips an optional Linux build dependency that's only needed for Wayland; see [below](#wayland).)
 
 > Prefer not to install globally? Use `uv sync --extra cuda` and prefix every command with `uv run` (e.g. `uv run stt dictate`).
 
@@ -90,7 +90,7 @@ journalctl --user -u local-stt -f                    # follow the logs
 
 The unit sets `Environment=DISPLAY=:0` and installs into `default.target` (Cinnamon doesn't reliably activate `graphical-session.target` for the user manager). If your session uses a different display, edit `DISPLAY` in the unit.
 
-Only one tray runs at a time — the service plus a manual `stt tray` won't double up (a second instance just exits).
+Only one tray runs at a time: the service plus a manual `stt tray` won't double up (a second instance just exits).
 
 > Prefer a desktop autostart entry instead? Create `~/.config/autostart/local-stt-tray.desktop` with `Exec=` pointing at `$(command -v stt) tray`. The systemd service is recommended (auto-restart + journald logs); don't enable both.
 
@@ -167,7 +167,7 @@ launchd restarts the app if it crashes, but not after you pick Quit from the men
 ## Usage
 
 ```bash
-# Dictation — press Alt+Shift+T to start, press again to stop (default: toggle mode)
+# Dictation: press Alt+Shift+T to start, press again to stop (default: toggle mode)
 stt dictate
 
 # Transcribe files
@@ -180,7 +180,7 @@ stt tray
 # Settings page in your browser (model, hotkey, modes, downloads)
 stt settings                              # or the tray's "Settings…" item
 
-# Meetings — records mic (Me) + system audio (Them), transcribes on stop
+# Meetings: records mic (Me) + system audio (Them), transcribes on stop
 stt meeting --name "weekly standup"
 stt meeting stop                          # from another terminal, or just Ctrl+C
 stt meeting transcribe <session-dir>      # (re)transcribe an existing recording
@@ -199,20 +199,20 @@ stt models remove medium
 
 ## Settings UI
 
-`stt settings` (or the tray's **Settings…** item) opens a local page served on `127.0.0.1` with a per-session token — no internet involved. From it you can:
+`stt settings` (or the tray's **Settings…** item) opens a local page served on `127.0.0.1` with a per-session token. No internet is involved. From it you can:
 
 - switch the active model, and download/remove models;
 - rebind the dictation hotkey by **pressing** the combo, or by tapping one modifier on its own (Right Option);
 - change mode (toggle/hold), output (type/clipboard), language, and the meetings folder;
 - set a Hugging Face token for diarization.
 
-**Apply** restarts the dictation daemon in place — changes take effect immediately, no logout. Edits are written to `config.toml` with your comments preserved.
+**Apply** restarts the dictation daemon in place, so changes take effect right away without a logout. Edits are written to `config.toml` with your comments preserved.
 
 ---
 
 ## Configuration
 
-`~/.config/local-stt/config.toml` — created on first save; every key is optional and falls back to the defaults below.
+`~/.config/local-stt/config.toml` is created on first save; every key is optional and falls back to the defaults below.
 
 ```toml
 [model]
@@ -290,7 +290,7 @@ It runs on the CPU (CTranslate2 has no Apple GPU support): about 2x real time on
    uv tool install --editable '.[cuda,diarize]' --overrides overrides.txt
    ```
 
-Without these steps everything else works unchanged — pyannote is never loaded unless you pass `--diarize`.
+Without these steps everything else works unchanged. pyannote is never loaded unless you pass `--diarize`.
 
 ---
 

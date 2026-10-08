@@ -1,4 +1,4 @@
-"""faster-whisper (CTranslate2) backend — the default ASR engine."""
+"""faster-whisper (CTranslate2) backend for the Whisper models."""
 
 from __future__ import annotations
 
@@ -18,9 +18,8 @@ log = logging.getLogger(__name__)
 
 
 def _cpu_threads() -> int:
-    """On Apple Silicon use the performance cores: 8 threads on an M4 Pro
-    ran a Bengali clip in 4.1s against 5.7s with CTranslate2's default.
-    0 keeps the library default elsewhere."""
+    """Performance cores on Apple Silicon (8 threads: 4.1s vs 5.7s on an M4 Pro
+    Bengali clip); 0 keeps the library default elsewhere."""
     if sys.platform != "darwin":
         return 0
     try:
@@ -49,8 +48,6 @@ class FasterWhisperBackend(AsrBackend):
         # serialize them (the tray shares one backend across dictation +
         # meeting transcription).
         self._infer_lock = threading.Lock()
-
-    # -- model lifecycle ----------------------------------------------------
 
     def _resolve_device(self) -> tuple[str, str]:
         if self.device == "cuda" or (self.device == "auto" and models.cuda_available()):
@@ -105,8 +102,6 @@ class FasterWhisperBackend(AsrBackend):
 
     def download_model(self, model: str) -> None:
         models.download(model)
-
-    # -- transcription ------------------------------------------------------
 
     def transcribe_file(self, path: Path, opts: TranscribeOptions) -> Transcript:
         from ..audio.decode import decode_to_pcm

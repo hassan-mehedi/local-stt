@@ -34,11 +34,8 @@ def _words(tokens) -> list[Word]:
 
 
 class ParakeetMlxBackend(AsrBackend):
-    """All MLX work runs on one worker thread. MLX binds its streams to the
-    thread that created them, so a model loaded on one thread fails with
-    "There is no Stream(cpu, 1) in current thread" when run from another,
-    and the tray loads and transcribes on different threads. The single
-    worker also serializes dictation and meeting transcription."""
+    """Runs all MLX work on one thread: MLX binds streams to the thread that made
+    them, and the tray loads and transcribes on different threads."""
 
     def __init__(self, model_name: str = "parakeet-tdt-0.6b-v3"):
         self.model_name = model_name
@@ -55,8 +52,6 @@ class ParakeetMlxBackend(AsrBackend):
                 )
             executor = self._executor
         return executor.submit(fn, *args).result()
-
-    # -- model lifecycle ----------------------------------------------------
 
     def load(self):
         return self._on_mlx_thread(self._load)
@@ -100,8 +95,6 @@ class ParakeetMlxBackend(AsrBackend):
 
     def download_model(self, model: str) -> None:
         models.download(model)
-
-    # -- transcription ------------------------------------------------------
 
     def transcribe_file(self, path: Path, opts: TranscribeOptions) -> Transcript:
         from ..audio.decode import decode_to_pcm

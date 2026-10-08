@@ -1,6 +1,6 @@
 [Unit]
 Description=local-stt tray (dictation + meeting transcription)
-# Ordering only — Cinnamon doesn't always activate graphical-session.target
+# Ordering only: Cinnamon doesn't always activate graphical-session.target
 # in the systemd user manager, so we install into default.target below.
 After=graphical-session.target
 

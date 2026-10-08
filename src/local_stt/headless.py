@@ -1,14 +1,5 @@
-"""`stt engine`: the dictation and meeting engine behind the desktop app.
-
-The app starts this as a child process. It prints {"port", "token"} as its
-first stdout line, serves the settings and app API on that port, streams
-state, mic level and saved dictations from /api/events, and exits when its
-stdin closes, so it never outlives the app.
-
-It is the tray app without a menu bar: HeadlessShell keeps the main thread
-in a run loop (pynput's keyboard layout and the front app need one there)
-and turns the tray's notifications into events for the app window.
-"""
+"""`stt engine`: the tray app without a menu bar, run by the desktop app. Prints
+{"port", "token"} first, serves the API and /api/events, exits when stdin closes."""
 
 from __future__ import annotations
 
@@ -140,8 +131,6 @@ class EngineApp(tray.TrayApp):
         self._transcribing: set[str] = set()
         self._last_level = 0.0
 
-    # -- state -------------------------------------------------------------------
-
     def extra_state(self) -> dict:
         meeting = self._meeting
         return {
@@ -195,8 +184,6 @@ class EngineApp(tray.TrayApp):
     def _front_app(self) -> FrontApp | None:
         tracker = self._ui.front_apps if self._ui is not None else None
         return tracker.current() if tracker is not None else None
-
-    # -- dictation ---------------------------------------------------------------------
 
     def _daemon_hooks(self) -> dict:
         return {
@@ -259,8 +246,6 @@ class EngineApp(tray.TrayApp):
         self.publish_state()
         return error
 
-    # -- meetings ------------------------------------------------------------------------
-
     def meetings_dir(self) -> Path:
         return Path(self.config.meeting.output_dir).expanduser()
 
@@ -310,8 +295,6 @@ class EngineApp(tray.TrayApp):
         model, _ = choose_model(self.config, settings.get("model"), settings.get("language"))
         rec = SimpleNamespace(session_dir=folder, title=session_id, model=model)
         threading.Thread(target=self._transcribe_meeting, args=(rec,), daemon=True).start()
-
-    # -- lifecycle ---------------------------------------------------------------------
 
     def _watch_stdin(self) -> None:
         try:

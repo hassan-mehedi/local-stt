@@ -9,7 +9,7 @@ dist/
 
 # uv / virtualenv
 .venv/
-# uv.lock IS committed — this is an application, so a pinned lockfile gives
+# uv.lock is committed: this is an application, so a pinned lockfile gives
 # anyone who clones a reproducible install.
 
 # Editor / OS

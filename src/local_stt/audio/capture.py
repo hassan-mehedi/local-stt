@@ -13,13 +13,8 @@ TARGET_RATE = 16000
 
 
 class Recorder:
-    """Records from the default input device while active.
-
-    Opens the stream at 16kHz if the device supports it, otherwise at the
-    device's native rate with soxr resampling on stop. The stream callback
-    only appends to a list — it never blocks. on_level, if given, gets each
-    block's RMS level (0..1) from the audio thread.
-    """
+    """Records the default input device at 16 kHz, or resampled to it on stop. The
+    callback only appends, so it never blocks; on_level gets each block's RMS."""
 
     def __init__(self, device: int | str | None = None, on_level=None):
         self.device = device

@@ -1,6 +1,5 @@
-"""The meetings folder as the app shows it: one entry per session directory
-(<output_dir>/<YYYY-MM-DD>-<title>/), its transcript, and one mixed audio
-track for playback."""
+"""The meetings folder as the app shows it: one entry per session directory,
+its transcript and one mixed track for playback."""
 
 from __future__ import annotations
 

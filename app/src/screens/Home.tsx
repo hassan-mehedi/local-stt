@@ -156,7 +156,7 @@ export default function Home() {
                     onClick={() => setSelected(isSelected ? null : item.id)}
                     onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && setSelected(isSelected ? null : item.id)}>
                     <span className="h-time">{clock(new Date(item.created_at * 1000))}</span>
-                    <span className="h-app" title={item.app_name ?? ""}>{item.app_name ?? "—"}</span>
+                    <span className="h-app" title={item.app_name ?? ""}>{item.app_name ?? "-"}</span>
                     <span className="h-text selectable">{item.text}</span>
                     {isSelected ? (
                       <div className="h-actions" onClick={(e) => e.stopPropagation()}>

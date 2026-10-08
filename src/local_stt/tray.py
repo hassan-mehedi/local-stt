@@ -1,10 +1,5 @@
-"""Tray / menu bar app: dictation toggle, meeting record, settings, and a
-status icon. The app logic lives here; the platform UI is a shell from
-ui.tray_gtk (Linux) or ui.tray_mac (macOS).
-
-Icon states: off, idle (listening), recording (dictation utterance or
-meeting), transcribing.
-"""
+"""Tray / menu bar app logic. The platform UI is a shell from ui.tray_gtk (Linux)
+or ui.tray_mac (macOS); icon states are off, idle, recording and transcribing."""
 
 from __future__ import annotations
 
@@ -61,8 +56,6 @@ class TrayApp:
         self._dictation_state = "off"
         self._lock = threading.Lock()
 
-    # -- state / icon --------------------------------------------------------
-
     def _set_state(self, state: str) -> None:
         # meeting recording dominates the icon unless dictation is mid-utterance
         if self._meeting is not None and state == "idle":
@@ -78,8 +71,6 @@ class TrayApp:
     def _on_dictation_state(self, state: str) -> None:
         self._set_state(state)
         self._refresh()
-
-    # -- dictation ------------------------------------------------------------
 
     def dictation_on(self) -> bool:
         return self._daemon is not None
@@ -131,8 +122,6 @@ class TrayApp:
                 _notify("Dictation off")
         self._refresh()
 
-    # -- settings controller (called from the HTTP server thread) -------------
-
     def daemon_running(self) -> bool:
         return self._daemon is not None
 
@@ -161,9 +150,8 @@ class TrayApp:
         threading.Thread(target=self.start_dictation, daemon=True).start()
 
     def apply_config(self, cfg: Config) -> str | None:
-        """Adopt validated config; restart the daemon in place if running so
-        the new hotkey/mode/output/model take effect without a logout.
-        Returns an error message if the restart failed."""
+        """Adopts validated config and restarts a running daemon in place, so changes
+        apply without a logout. Returns an error message if the restart failed."""
         with self._lock:
             unchanged = (cfg.model, cfg.dictation) == (self.config.model, self.config.dictation)
             self.config = cfg
@@ -176,15 +164,12 @@ class TrayApp:
             self._set_state("off")
         return error
 
-    # -- meetings ---------------------------------------------------------------
-
     def meeting_on(self) -> bool:
         return self._meeting is not None
 
     def toggle_meeting(self, language: str | None = None) -> str | None:
-        """Start a meeting (in `language`, default from config), or stop the
-        running one whichever menu item was used. Returns an error message
-        if the meeting failed to start."""
+        """Starts a meeting in `language` (default from config), or stops the running
+        one. Returns an error message if the start failed."""
         with self._lock:
             if self._meeting is None:
                 from .meeting.recorder import MeetingRecorder
@@ -238,8 +223,6 @@ class TrayApp:
         finally:
             self._set_state("off" if self._daemon is None else "idle")
 
-    # -- misc -----------------------------------------------------------------------
-
     def open_meetings(self, icon=None, item=None) -> None:
         d = Path(self.config.meeting.output_dir).expanduser()
         d.mkdir(parents=True, exist_ok=True)
@@ -262,8 +245,6 @@ class TrayApp:
             self._meeting.stop()
         PIDFILE.unlink(missing_ok=True)
         self._ui.quit()
-
-    # -- menu -----------------------------------------------------------------
 
     @staticmethod
     def _in_thread(fn):
@@ -310,8 +291,6 @@ class TrayApp:
             (lambda: "Quit", self.quit),
         ]
 
-    # -- lifecycle ------------------------------------------------------------
-
     def run(self) -> None:
         if not _single_instance():
             log.warning("another local-stt tray is already running; exiting")
@@ -342,7 +321,6 @@ class TrayApp:
             # permissions are in place
             self.open_onboarding()
         else:
-            # start dictation by default: the reason the tray exists
             threading.Thread(target=self.toggle_dictation, daemon=True).start()
         self._ui.run(on_signal=self.quit)
 

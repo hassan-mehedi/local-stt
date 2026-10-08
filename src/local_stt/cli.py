@@ -1,4 +1,4 @@
-"""stt — local dictation and transcription CLI."""
+"""stt: local dictation and transcription CLI."""
 
 from __future__ import annotations
 
@@ -30,8 +30,6 @@ def _build_backend(cfg, model_override=None, device_override=None):
         compute_type=cfg.model.compute_type,
     )
 
-
-# -- subcommands ---------------------------------------------------------------
 
 
 def cmd_dictate(args) -> int:
@@ -114,7 +112,7 @@ def _transcribe_session(
     system_wav = session_dir / "raw" / "system.wav"
     for p in (mic_wav, system_wav):
         if not p.exists():
-            print(f"error: {p} not found — not a meeting session dir?", file=sys.stderr)
+            print(f"error: {p} not found; is this a meeting session dir?", file=sys.stderr)
             return 1
 
     # what the session was recorded with, unless overridden now
@@ -217,7 +215,7 @@ def cmd_meeting(args) -> int:
     print("\nRecording stopped. Transcribing...", file=sys.stderr)
     return _transcribe_session(
         recorder.session_dir,
-        title=f"{title} — {datetime.now():%Y-%m-%d}",
+        title=f"{title}, {datetime.now():%Y-%m-%d}",
         cfg=cfg,
         diarize=args.diarize,
     )
@@ -230,9 +228,9 @@ def cmd_tray(args) -> int:
 
 
 def cmd_engine(args) -> int:
-    from . import helper
+    from . import headless
 
-    return helper.main()
+    return headless.main()
 
 
 def cmd_settings(args) -> int:
@@ -241,20 +239,18 @@ def cmd_settings(args) -> int:
     from .desktop import open_target
     from .ui.state import read_state
 
-    # if the tray's server is already up, just open it
     existing = read_state()
     if existing and _server_alive(existing):
         print(f"Opening {existing['url']}", file=sys.stderr)
         open_target(existing["url"])
         return 0
 
-    # otherwise run a standalone (config-only) server until Ctrl+C
     from .ui.server import SettingsServer
 
     server = SettingsServer()
     url = server.start()
     print(
-        f"Settings at {url}\n(standalone — daemon not running; edits save to "
+        f"Settings at {url}\n(standalone: the daemon is not running; edits save to "
         "config.toml)\nPress Ctrl+C to stop.",
         file=sys.stderr,
     )
@@ -308,8 +304,6 @@ def cmd_models(args) -> int:
         return 0
     return 1
 
-
-# -- entry point -----------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:

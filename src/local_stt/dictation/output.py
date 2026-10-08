@@ -1,10 +1,5 @@
-"""Emit transcribed text into the focused window.
-
-X11:     xdotool type / xclip + Ctrl+V
-Wayland: wtype (or ydotool) / wl-copy + paste keystroke
-macOS:   synthetic key events (pynput) / pbcopy + Cmd+V
-The right backend is picked per platform and session type at startup.
-"""
+"""Types transcribed text into the focused window: xdotool on X11, wtype or
+ydotool on Wayland, pynput on macOS, with a clipboard paste fallback."""
 
 from __future__ import annotations
 
@@ -30,13 +25,10 @@ class TextOutput(ABC):
     def emit(self, text: str) -> None: ...
 
 
-# -- X11 ------------------------------------------------------------------------
-
 
 class TypeOutput(TextOutput):
-    """Simulated typing via xdotool. --clearmodifiers because the user may
-    still be releasing the hotkey when typing starts; small --delay because
-    some apps drop events at delay 0."""
+    """xdotool typing. --clearmodifiers because the hotkey may still be held, and a
+    small --delay because some apps drop events at delay 0."""
 
     def __init__(self):
         _require("xdotool", "Install it with: sudo apt install xdotool")
@@ -67,8 +59,6 @@ class ClipboardOutput(TextOutput):
             check=True,
         )
 
-
-# -- Wayland ----------------------------------------------------------------------
 
 
 class WtypeOutput(TextOutput):
@@ -101,7 +91,7 @@ class WaylandClipboardOutput(TextOutput):
         self._can_paste = bool(shutil.which("wtype"))
         if not self._can_paste:
             log.warning(
-                "wtype not found — text will be copied; paste manually with Ctrl+V"
+                "wtype not found; the text is copied, paste it with Ctrl+V"
             )
 
     def emit(self, text: str) -> None:
@@ -109,8 +99,6 @@ class WaylandClipboardOutput(TextOutput):
         if self._can_paste:
             subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], check=True)
 
-
-# -- macOS ------------------------------------------------------------------------------
 
 
 def _require_accessibility() -> None:
@@ -126,9 +114,8 @@ def _require_accessibility() -> None:
 
 
 class MacTypeOutput(TextOutput):
-    """Key events carry the text itself, so any keyboard layout works.
-    pynput sets modifier flags explicitly, so a still-held hotkey
-    modifier doesn't turn 'a' into 'å'."""
+    """Key events carry the text, so any layout works, and pynput sets modifier
+    flags itself, so a held hotkey modifier can't turn 'a' into 'å'."""
 
     def __init__(self):
         from pynput.keyboard import Controller
@@ -162,8 +149,6 @@ class MacClipboardOutput(TextOutput):
         with self._keyboard.pressed(Key.cmd):
             self._keyboard.tap("v")
 
-
-# -- factory --------------------------------------------------------------------------
 
 
 def make_output(mode: str) -> TextOutput:

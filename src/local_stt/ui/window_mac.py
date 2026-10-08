@@ -1,9 +1,5 @@
-"""A native window showing a page from the local settings server (onboarding
-and settings). Main thread only; MacShell hops here with callAfter.
-
-While the window is open the app shows in the Dock and the app switcher, so
-it can't get lost behind other windows; closing it goes back to menu bar only.
-"""
+"""Native window for a settings server page (onboarding, settings); main thread
+only. While open the app shows in the Dock so the window can't get lost."""
 
 from __future__ import annotations
 

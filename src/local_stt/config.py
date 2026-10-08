@@ -107,8 +107,6 @@ def load_config(path: Path | None = None) -> Config:
     )
 
 
-# -- validation + save (used by the management UI) ----------------------------
-
 # allowed enum values, validated server-side before any save
 ENUMS = {
     ("model", "compute_type"): {
@@ -128,7 +126,6 @@ class ConfigError(ValueError):
 def validate(cfg: Config) -> Config:
     """Raise ConfigError if any field is invalid. Returns cfg for chaining."""
     from .dictation.hotkey import parse_hotkey
-    from .engine import models
 
     _validate_model(cfg.model.name, cfg.model.language, "[model]")
     if cfg.meeting.model:
@@ -176,11 +173,7 @@ def _as_tables(cfg: Config) -> dict:
 
 
 def save_config(cfg: Config, path: Path | None = None) -> None:
-    """Validate and write config, preserving existing comments/formatting.
-
-    Uses tomlkit so a hand-edited config.toml keeps its comments — the UI is
-    just another editor of the same file.
-    """
+    """Validates and writes config; tomlkit keeps a hand-edited file's comments."""
     import tomlkit
 
     path = path or CONFIG_PATH  # resolved at call time so tests can patch it

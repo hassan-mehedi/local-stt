@@ -1,5 +1,4 @@
-"""The API the desktop app adds on top of the settings API: history, stats,
-dictionary, meetings and dictation control. Each route returns a JSON-able
+"""Routes the desktop app adds to the settings API. Each returns a JSON-able
 object, or a FileReply for audio."""
 
 from __future__ import annotations

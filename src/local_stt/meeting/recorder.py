@@ -30,11 +30,8 @@ def _track_recorders(mic_path: Path, system_path: Path):
 
 
 class MeetingRecorder:
-    """Records mic ('Me') and system audio ('Them') into a session directory.
-
-    Layout: <output_dir>/<YYYY-MM-DD>-<title>/raw/{mic,system}.wav
-    Both tracks stream to disk while recording — nothing is held in RAM.
-    """
+    """Records mic ('Me') and system audio ('Them') straight to disk, into
+    <output_dir>/<YYYY-MM-DD>-<title>/raw/{mic,system}.wav."""
 
     def __init__(self, output_dir: Path, title: str, when: datetime):
         self.title = title

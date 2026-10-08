@@ -1,14 +1,10 @@
-"""Runtime discovery of the settings server: ~/.cache/local-stt/ui.json.
-
-The tray writes {url, port, token} here when it starts the HTTP server, so
-`stt settings` can find and open the right authenticated URL.
-"""
+"""~/.cache/local-stt/ui.json: where the tray writes the settings server's
+{url, port, token} so `stt settings` can open it."""
 
 from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 from ..config import CACHE_DIR
 

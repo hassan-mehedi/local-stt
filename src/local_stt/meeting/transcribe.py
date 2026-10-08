@@ -12,10 +12,8 @@ SETTINGS_FILE = "session.json"
 
 
 def choose_model(cfg, model: str | None = None, language: str | None = None) -> tuple[str, str]:
-    """(model, language) for a meeting. Explicit arguments win, then
-    [meeting], then [model]. Asking for a language the chosen model lacks,
-    with no model given, picks a downloaded model that has it: `--language
-    bn` finds bengali-whisper-medium."""
+    """(model, language) for a meeting: arguments win, then [meeting], then [model].
+    Given only a language the model lacks, it picks a downloaded model with it."""
     from ..engine import models
 
     if language is None:

@@ -1,10 +1,5 @@
-"""Meeting tracks on macOS: system audio via a compiled Swift helper (Core
-Audio process tap) and the mic via sounddevice. Both stream to WAV on disk.
-
-The app bundle ships the helper prebuilt (packaging/macos/build.sh). From a
-source install it is compiled on first use and cached by source hash, so it
-needs the Xcode command line tools (xcode-select --install) once.
-"""
+"""Meeting tracks on macOS: system audio from a Swift Core Audio tap helper and
+the mic from sounddevice. A source install compiles the helper once (Xcode CLT)."""
 
 from __future__ import annotations
 

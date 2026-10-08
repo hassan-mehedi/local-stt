@@ -83,7 +83,6 @@ export default function Pill() {
     return () => window.clearInterval(t);
   }, [dictation]);
 
-  // menu bar icon and menu rows
   useEffect(() => {
     if (state) tauri("set_tray_state", { dictation: state.dictation, meeting: !!state.meeting.recording });
   }, [state?.dictation, state?.meeting.recording]);

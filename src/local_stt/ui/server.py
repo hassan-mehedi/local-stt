@@ -1,13 +1,5 @@
-"""Local settings server: one static page + a small JSON API.
-
-Bound to 127.0.0.1 with a per-session token. The tray passes a `controller`
-exposing live actions (daemon status/restart, model download/switch); without
-one, the server still edits config.toml (the page shows "daemon: off").
-
-The desktop app's engine also gives the controller a history store and an
-event bus, which turns on the routes in app_api and the /api/events stream.
-Its window loads from another origin, so those replies carry CORS headers.
-"""
+"""Local settings server on 127.0.0.1 with a per-session token. With a store and
+event bus on the controller it also serves app_api and /api/events, with CORS."""
 
 from __future__ import annotations
 
@@ -188,212 +180,212 @@ class _Downloads:
 _downloads = _Downloads()
 
 
-def make_handler(token: str, controller: Controller):
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            pass  # silence default stderr access log
+class _Handler(BaseHTTPRequestHandler):
+    token: str
+    controller: Controller
 
-        # -- helpers --------------------------------------------------------
+    def log_message(self, *args):
+        pass  # silence default stderr access log
 
-        def _authed(self) -> bool:
-            q = parse_qs(urlparse(self.path).query)
-            header = self.headers.get("X-Token")
-            return secrets.compare_digest(
-                (q.get("token", [""])[0] or header or ""), token
-            )
+    def _authed(self) -> bool:
+        q = parse_qs(urlparse(self.path).query)
+        header = self.headers.get("X-Token")
+        return secrets.compare_digest(
+            (q.get("token", [""])[0] or header or ""), self.token
+        )
 
-        def _cors(self):
-            origin = self.headers.get("Origin")
-            if origin in APP_ORIGINS:
-                self.send_header("Access-Control-Allow-Origin", origin)
-                self.send_header("Vary", "Origin")
+    def _cors(self):
+        origin = self.headers.get("Origin")
+        if origin in APP_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
 
-        def _send_json(self, obj, status=200):
-            body = json.dumps(obj).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self._cors()
-            self.end_headers()
-            self.wfile.write(body)
+    def _send_json(self, obj, status=200):
+        body = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self._cors()
+        self.end_headers()
+        self.wfile.write(body)
 
-        def do_OPTIONS(self):
-            self.send_response(204)
-            self._cors()
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "X-Token, Content-Type")
-            self.send_header("Access-Control-Max-Age", "600")
-            self.end_headers()
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "X-Token, Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.end_headers()
 
-        def _send_file_reply(self, reply: app_api.FileReply):
-            """Byte ranges included: WebKit only plays audio served with them."""
-            size = reply.path.stat().st_size
-            start, end = 0, size - 1
-            match = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
-            if match and (match.group(1) or match.group(2)):
-                if match.group(1):
-                    start = int(match.group(1))
-                    end = min(int(match.group(2)), size - 1) if match.group(2) else size - 1
-                else:
-                    start = max(0, size - int(match.group(2)))
-                if start > end:
-                    self.send_response(416)
-                    self.send_header("Content-Range", f"bytes */{size}")
-                    self._cors()
-                    self.end_headers()
-                    return
-                self.send_response(206)
-                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+    def _send_file_reply(self, reply: app_api.FileReply):
+        """Byte ranges included: WebKit only plays audio served with them."""
+        size = reply.path.stat().st_size
+        start, end = 0, size - 1
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
+        if match and (match.group(1) or match.group(2)):
+            if match.group(1):
+                start = int(match.group(1))
+                end = min(int(match.group(2)), size - 1) if match.group(2) else size - 1
             else:
-                self.send_response(200)
-            self.send_header("Content-Type", reply.content_type)
-            self.send_header("Content-Length", str(end - start + 1))
-            self.send_header("Accept-Ranges", "bytes")
+                start = max(0, size - int(match.group(2)))
+            if start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self._cors()
+                self.end_headers()
+                return
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        else:
+            self.send_response(200)
+        self.send_header("Content-Type", reply.content_type)
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "no-store")
+        self._cors()
+        self.end_headers()
+        with open(reply.path, "rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(65536, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
+    def _stream_events(self):
+        events = self.controller.events.subscribe()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-store")
             self._cors()
             self.end_headers()
-            with open(reply.path, "rb") as f:
-                f.seek(start)
-                remaining = end - start + 1
-                while remaining > 0:
-                    chunk = f.read(min(65536, remaining))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
-
-        def _stream_events(self):
-            events = controller.events.subscribe()
-            try:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-store")
-                self._cors()
-                self.end_headers()
-                self.wfile.write(b"retry: 1000\n\n")
-                self.wfile.flush()
-                controller.publish_state()
-                while True:
-                    try:
-                        message = events.get(timeout=15)
-                    except queue.Empty:
-                        message = b": ping\n\n"
-                    self.wfile.write(message)
-                    self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                controller.events.unsubscribe(events)
-
-        def _reply(self, result):
-            if isinstance(result, app_api.FileReply):
-                return self._send_file_reply(result)
-            return self._send_json(result)
-
-        def _read_json(self) -> dict:
-            length = int(self.headers.get("Content-Length", 0))
-            return json.loads(self.rfile.read(length) or b"{}")
-
-        # -- routing --------------------------------------------------------
-
-        def do_GET(self):
-            path = urlparse(self.path).path
-            if path in PAGES:
-                return self._serve_file(PAGES[path], "text/html; charset=utf-8")
-            if path in ASSETS:
-                return self._serve_file(path.removeprefix("/static/"), ASSETS[path])
-            if not path.startswith("/api/"):
-                return self._send_json({"error": "not found"}, 404)  # e.g. favicon.ico
-            if not self._authed():
-                return self._send_json({"error": "unauthorized"}, 401)
-            if path == "/api/state":
-                return self._send_json(build_state(controller))
-            if path == "/api/permissions":
-                return self._send_json(permissions_state())
-            if path == "/api/events" and controller.events is not None:
-                return self._stream_events()
-            if controller.store is not None:
+            self.wfile.write(b"retry: 1000\n\n")
+            self.wfile.flush()
+            self.controller.publish_state()
+            while True:
                 try:
-                    result = app_api.handle_get(controller, path, parse_qs(urlparse(self.path).query))
-                except LookupError as e:
-                    return self._send_json({"error": str(e)}, 404)
-                except ValueError as e:
-                    return self._send_json({"error": str(e)}, 400)
-                except Exception as e:
-                    log.exception("API error")
-                    return self._send_json({"error": str(e)}, 500)
-                if result is not None:
-                    return self._reply(result)
-            return self._send_json({"error": "not found"}, 404)
+                    message = events.get(timeout=15)
+                except queue.Empty:
+                    message = b": ping\n\n"
+                self.wfile.write(message)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            self.controller.events.unsubscribe(events)
 
-        def do_POST(self):
-            if not self._authed():
-                return self._send_json({"error": "unauthorized"}, 401)
-            path = urlparse(self.path).path
+    def _reply(self, result):
+        if isinstance(result, app_api.FileReply):
+            return self._send_file_reply(result)
+        return self._send_json(result)
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length) or b"{}")
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path in PAGES:
+            return self._serve_file(PAGES[path], "text/html; charset=utf-8")
+        if path in ASSETS:
+            return self._serve_file(path.removeprefix("/static/"), ASSETS[path])
+        if not path.startswith("/api/"):
+            return self._send_json({"error": "not found"}, 404)  # e.g. favicon.ico
+        if not self._authed():
+            return self._send_json({"error": "unauthorized"}, 401)
+        if path == "/api/state":
+            return self._send_json(build_state(self.controller))
+        if path == "/api/permissions":
+            return self._send_json(permissions_state())
+        if path == "/api/events" and self.controller.events is not None:
+            return self._stream_events()
+        if self.controller.store is not None:
             try:
-                if path == "/api/config":
-                    return self._save_config()
-                if path == "/api/models/download":
-                    _downloads.start(self._read_json()["name"])
-                    return self._send_json({"ok": True})
-                if path == "/api/models/remove":
-                    models.remove(self._read_json()["name"])
-                    return self._send_json({"ok": True})
-                if path == "/api/permissions/request":
-                    permissions.request(self._read_json()["name"])
-                    return self._send_json(permissions_state())
-                if path == "/api/login-item":
-                    permissions.set_login_item(bool(self._read_json()["enabled"]))
-                    return self._send_json(permissions_state())
-                if path == "/api/dictation/start":
-                    error = controller.start_dictation()
-                    return self._send_json({"ok": error is None, "error": error})
-                if path == "/api/onboarding/step":
-                    save_onboarding(step=int(self._read_json()["step"]))
-                    return self._send_json({"ok": True})
-                if path == "/api/relaunch":
-                    if app_bundle() is None:
-                        return self._send_json({"error": "relaunch needs local-stt.app"}, 400)
-                    # after the reply is out, since quitting stops this server
-                    threading.Timer(0.3, controller.relaunch).start()
-                    return self._send_json({"ok": True})
-                if path == "/api/onboarding/done":
-                    controller.finish_onboarding()
-                    return self._send_json({"ok": True})
-                if controller.store is not None:
-                    result = app_api.handle_post(controller, path, self._read_json())
-                    if result is not None:
-                        return self._send_json(result)
+                result = app_api.handle_get(self.controller, path, parse_qs(urlparse(self.path).query))
             except LookupError as e:
                 return self._send_json({"error": str(e)}, 404)
-            except ValueError as e:  # ConfigError, unknown model, bad JSON
+            except ValueError as e:
                 return self._send_json({"error": str(e)}, 400)
             except Exception as e:
                 log.exception("API error")
                 return self._send_json({"error": str(e)}, 500)
-            return self._send_json({"error": "not found"}, 404)
+            if result is not None:
+                return self._reply(result)
+        return self._send_json({"error": "not found"}, 404)
 
-        def _save_config(self):
-            cfg = _config_from_payload(self._read_json())
-            save_config(cfg)  # validates, then writes (atomic)
-            reload_error = controller.apply_config(cfg)  # live-reload the daemon
-            return self._send_json({
-                "ok": True,
-                "config": asdict(cfg),
-                "daemon_running": controller.daemon_running(),
-                "reload_error": reload_error,
-            })
+    def do_POST(self):
+        if not self._authed():
+            return self._send_json({"error": "unauthorized"}, 401)
+        path = urlparse(self.path).path
+        try:
+            if path == "/api/config":
+                return self._save_config()
+            if path == "/api/models/download":
+                _downloads.start(self._read_json()["name"])
+                return self._send_json({"ok": True})
+            if path == "/api/models/remove":
+                models.remove(self._read_json()["name"])
+                return self._send_json({"ok": True})
+            if path == "/api/permissions/request":
+                permissions.request(self._read_json()["name"])
+                return self._send_json(permissions_state())
+            if path == "/api/login-item":
+                permissions.set_login_item(bool(self._read_json()["enabled"]))
+                return self._send_json(permissions_state())
+            if path == "/api/dictation/start":
+                error = self.controller.start_dictation()
+                return self._send_json({"ok": error is None, "error": error})
+            if path == "/api/onboarding/step":
+                save_onboarding(step=int(self._read_json()["step"]))
+                return self._send_json({"ok": True})
+            if path == "/api/relaunch":
+                if app_bundle() is None:
+                    return self._send_json({"error": "relaunch needs local-stt.app"}, 400)
+                # after the reply is out, since quitting stops this server
+                threading.Timer(0.3, self.controller.relaunch).start()
+                return self._send_json({"ok": True})
+            if path == "/api/onboarding/done":
+                self.controller.finish_onboarding()
+                return self._send_json({"ok": True})
+            if self.controller.store is not None:
+                result = app_api.handle_post(self.controller, path, self._read_json())
+                if result is not None:
+                    return self._send_json(result)
+        except LookupError as e:
+            return self._send_json({"error": str(e)}, 404)
+        except ValueError as e:  # ConfigError, unknown model, bad JSON
+            return self._send_json({"error": str(e)}, 400)
+        except Exception as e:
+            log.exception("API error")
+            return self._send_json({"error": str(e)}, 500)
+        return self._send_json({"error": "not found"}, 404)
 
-        def _serve_file(self, name: str, content_type: str):
-            body = (STATIC_DIR / name).read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+    def _save_config(self):
+        cfg = _config_from_payload(self._read_json())
+        save_config(cfg)
+        reload_error = self.controller.apply_config(cfg)
+        return self._send_json({
+            "ok": True,
+            "config": asdict(cfg),
+            "daemon_running": self.controller.daemon_running(),
+            "reload_error": reload_error,
+        })
 
-    return Handler
+    def _serve_file(self, name: str, content_type: str):
+        body = (STATIC_DIR / name).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def make_handler(token: str, controller: Controller) -> type[_Handler]:
+    return type("Handler", (_Handler,), {"token": token, "controller": controller})
 
 
 class _LocalServer(ThreadingHTTPServer):

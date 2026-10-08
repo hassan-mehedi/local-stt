@@ -1,14 +1,5 @@
-"""Hotkey listener backends.
-
-PynputListener — X11 (no special permissions) and macOS (needs Input
-                 Monitoring permission).
-EvdevListener  — Wayland (reads /dev/input directly; user must be in the
-                 'input' group and the [wayland] extra installed).
-
-Both call on_activate() when the full combo goes down, on_deactivate()
-when the trigger key is released, and on_cancel() for Esc. Callbacks must
-not block.
-"""
+"""Hotkey listeners: pynput on X11 and macOS, evdev on Wayland. Callbacks run
+for combo down, trigger up and Esc, and must not block."""
 
 from __future__ import annotations
 
