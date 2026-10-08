@@ -56,6 +56,13 @@ export default function Pill() {
 
   useEffect(() => onPillIdleChange(setShowIdle), []);
 
+  // on macOS the page sees no mouse moves in the pill, so the panel reports hover
+  useEffect(() => {
+    if (!inTauri) return;
+    const off = listen<boolean>("pill-hover", (e) => setHover(e.payload));
+    return () => void off.then((f) => f());
+  }, []);
+
   useEffect(() => on("level", ({ level }) => {
     setLevels((old) => [...old.slice(1), level]);
   }), []);
