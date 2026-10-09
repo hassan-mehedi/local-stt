@@ -56,10 +56,8 @@ class CleanupConfig:
     """An LLM rewrites each dictation: fillers, false starts, punctuation, lists."""
 
     enabled: bool = False
-    provider: str = "local"  # "local" (MLX on this Mac) | "api" (OpenAI-compatible)
-    model: str = "qwen3-4b"  # the local model
-    api_url: str = ""  # e.g. https://api.deepseek.com/v1; the key is in the Keychain
-    api_model: str = ""  # e.g. deepseek-chat
+    api_url: str = ""  # any OpenAI-compatible API; the key is in the Keychain
+    api_model: str = ""
 
 
 @dataclass
@@ -111,11 +109,15 @@ def load_config(path: Path | None = None) -> Config:
         return Config()
     with open(path, "rb") as f:
         raw = tomllib.load(f)
+    cleanup = _section(CleanupConfig, raw.get("cleanup", {}))
+    # a config from when cleanup could run on this Mac can be on with no API
+    if not (cleanup.api_url and cleanup.api_model):
+        cleanup.enabled = False
     return Config(
         model=_section(ModelConfig, raw.get("model", {})),
         dictation=_section(DictationConfig, raw.get("dictation", {})),
         meeting=_section(MeetingConfig, raw.get("meeting", {})),
-        cleanup=_section(CleanupConfig, raw.get("cleanup", {})),
+        cleanup=cleanup,
         diarize=_section(DiarizeConfig, raw.get("diarize", {})),
     )
 
@@ -129,7 +131,6 @@ ENUMS = {
     ("dictation", "mode"): {"toggle", "hold"},
     ("dictation", "output"): {"type", "clipboard"},
     ("dictation", "listener"): {"auto", "pynput", "evdev"},
-    ("cleanup", "provider"): {"local", "api"},
 }
 
 
@@ -169,24 +170,16 @@ def validate(cfg: Config) -> Config:
 def _validate_cleanup(c: CleanupConfig) -> None:
     from urllib.parse import urlparse
 
-    from .cleanup.local import MODELS
-
-    if c.provider == "local":
-        if c.model not in MODELS:
-            raise ConfigError(
-                f"Unknown cleanup model {c.model!r}. Choose one of: {', '.join(MODELS)}"
-            )
-        return
     url = urlparse(c.api_url)
     if not c.api_url:
-        raise ConfigError("[cleanup] needs the API URL, e.g. https://api.deepseek.com/v1")
+        raise ConfigError("[cleanup] needs the API URL, e.g. https://api.deepseek.com")
     if url.scheme not in ("http", "https") or not url.hostname:
         raise ConfigError(f"[cleanup] api_url {c.api_url!r} must start with https://")
     # the key travels in a header, so plain http only to this machine
     if url.scheme == "http" and url.hostname not in ("localhost", "127.0.0.1", "::1"):
         raise ConfigError("[cleanup] api_url must use https:// unless it is localhost")
     if not c.api_model.strip():
-        raise ConfigError("[cleanup] needs the model name, e.g. deepseek-chat")
+        raise ConfigError("[cleanup] needs the model name, e.g. deepseek-flash")
 
 
 def _validate_model(name: str, language: str, section: str) -> None:

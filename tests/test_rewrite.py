@@ -1,6 +1,8 @@
 import pytest
 
-from local_stt.cleanup.rewrite import CleanupError, messages, rewrite
+from local_stt.cleanup.api import ApiCleaner
+from local_stt.cleanup.rewrite import CleanupError, make_cleaner, messages, rewrite
+from local_stt.config import CleanupConfig
 
 
 class FakeCleaner:
@@ -8,8 +10,8 @@ class FakeCleaner:
         self.reply = reply
         self.calls = []
 
-    def complete(self, msgs, max_tokens):
-        self.calls.append((msgs, max_tokens))
+    def complete(self, msgs):
+        self.calls.append(msgs)
         return self.reply
 
 
@@ -49,3 +51,13 @@ def test_messages_name_the_app_and_the_dictionary_words():
     assert "Slack" in user["content"]
     assert "local-stt, WKWebView" in user["content"]
     assert "<transcript>\ncheck local stt\n</transcript>" in user["content"]
+
+
+@pytest.mark.parametrize("cfg, made", [
+    (CleanupConfig(enabled=True, api_url="https://api.deepseek.com", api_model="deepseek-flash"), True),
+    (CleanupConfig(enabled=False, api_url="https://api.deepseek.com", api_model="deepseek-flash"), False),
+    (CleanupConfig(enabled=True, api_url="", api_model="deepseek-flash"), False),
+    (CleanupConfig(enabled=True, api_url="https://api.deepseek.com", api_model=""), False),
+])
+def test_make_cleaner_needs_cleanup_on_with_an_api(cfg, made):
+    assert isinstance(make_cleaner(cfg), ApiCleaner) is made

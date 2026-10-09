@@ -91,15 +91,12 @@ def test_validate_rejects_parakeet_off_apple_silicon(monkeypatch):
 
 
 @pytest.mark.parametrize("changes, error", [
-    ({"provider": "cloud"}, "provider"),
-    ({"model": "gpt-9"}, "Unknown cleanup model"),
-    ({"provider": "api", "api_url": "", "api_model": "deepseek-chat"}, "API URL"),
-    ({"provider": "api", "api_url": "ftp://x", "api_model": "m"}, "http"),
-    ({"provider": "api", "api_url": "http://api.deepseek.com/v1", "api_model": "m"}, "https"),
-    ({"provider": "api", "api_url": "https://api.deepseek.com/v1", "api_model": ""}, "model name"),
-    ({"provider": "api", "api_url": "https://api.deepseek.com/v1", "api_model": "deepseek-chat"}, None),
-    ({"provider": "api", "api_url": "http://localhost:11434/v1", "api_model": "qwen3"}, None),
-    ({}, None),
+    ({"api_url": "", "api_model": "deepseek-flash"}, "API URL"),
+    ({"api_url": "ftp://x", "api_model": "m"}, "http"),
+    ({"api_url": "http://api.deepseek.com", "api_model": "m"}, "https"),
+    ({"api_url": "https://api.deepseek.com", "api_model": ""}, "model name"),
+    ({"api_url": "https://api.deepseek.com", "api_model": "deepseek-flash"}, None),
+    ({"api_url": "http://localhost:11434/v1", "api_model": "qwen3"}, None),
 ])
 def test_validate_checks_cleanup_settings(monkeypatch, changes, error):
     import local_stt.engine.models as models
@@ -114,3 +111,11 @@ def test_validate_checks_cleanup_settings(monkeypatch, changes, error):
     else:
         with pytest.raises(ConfigError, match=error):
             validate(cfg)
+
+
+def test_load_turns_off_a_cleanup_with_no_api(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[cleanup]\nenabled = true\nprovider = "local"\nmodel = "qwen3-4b"\napi_url = ""\n')
+    assert load_config(path).cleanup.enabled is False
+    path.write_text('[cleanup]\nenabled = true\napi_url = "https://api.deepseek.com"\napi_model = "deepseek-flash"\n')
+    assert load_config(path).cleanup.enabled is True

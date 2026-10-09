@@ -19,7 +19,6 @@ from urllib.parse import parse_qs, urlparse
 from .. import permissions
 from ..cleanup import api as cleanup_api
 from ..cleanup import keychain
-from ..cleanup import local as cleanup_local
 from ..config import (
     Config,
     default_model,
@@ -100,7 +99,9 @@ def build_state(controller: Controller) -> dict:
     ]
     downloading = _downloads.status()
     return {
-        "cleanup": cleanup_state(cfg),
+        "cleanup": {
+            "key_saved": bool(cfg.cleanup.api_url and keychain.get_key(cfg.cleanup.api_url)),
+        },
         "config": asdict(cfg),
         "platform": sys.platform,
         "default_model": default_model(),
@@ -114,27 +115,6 @@ def build_state(controller: Controller) -> dict:
             for name, s in downloading.items() if s == "running"
         },
         **controller.extra_state(),
-    }
-
-
-def cleanup_state(cfg: Config) -> dict:
-    downloading = _cleanup_downloads.status()
-    return {
-        "models": [
-            {
-                "name": name,
-                "label": m.label,
-                "size_mb": m.size_mb,
-                "downloaded": cleanup_local.is_downloaded(name),
-            }
-            for name, m in cleanup_local.MODELS.items()
-        ],
-        "downloading": downloading,
-        "progress": {
-            name: cleanup_local.download_progress(name)
-            for name, s in downloading.items() if s == "running"
-        },
-        "key_saved": bool(cfg.cleanup.api_url and keychain.get_key(cfg.cleanup.api_url)),
     }
 
 
@@ -179,9 +159,7 @@ def _config_from_payload(payload: dict) -> Config:
 class _Downloads:
     """Tracks background model downloads for progress polling."""
 
-    def __init__(self, download, check_name):
-        self._download = download
-        self._check_name = check_name
+    def __init__(self):
         self._lock = threading.Lock()
         self._state: dict[str, str] = {}  # model -> "running"|"done"|"error: ..."
 
@@ -190,7 +168,7 @@ class _Downloads:
             return dict(self._state)
 
     def start(self, name: str) -> None:
-        self._check_name(name)  # rejects unknown names before a thread starts
+        models.model_dir(name)  # rejects unknown names before a thread starts
         with self._lock:
             if self._state.get(name) == "running":
                 return
@@ -199,7 +177,7 @@ class _Downloads:
 
     def _run(self, name: str) -> None:
         try:
-            self._download(name)
+            models.download(name)
             with self._lock:
                 self._state[name] = "done"
         except Exception as e:
@@ -208,8 +186,7 @@ class _Downloads:
                 self._state[name] = f"error: {e}"
 
 
-_downloads = _Downloads(models.download, models.model_dir)
-_cleanup_downloads = _Downloads(cleanup_local.download, cleanup_local.model_dir)
+_downloads = _Downloads()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -360,12 +337,6 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True})
             if path == "/api/models/remove":
                 models.remove(self._read_json()["name"])
-                return self._send_json({"ok": True})
-            if path == "/api/cleanup/download":
-                _cleanup_downloads.start(self._read_json()["name"])
-                return self._send_json({"ok": True})
-            if path == "/api/cleanup/remove":
-                cleanup_local.remove(self._read_json()["name"])
                 return self._send_json({"ok": True})
             if path == "/api/cleanup/key":
                 body = self._read_json()

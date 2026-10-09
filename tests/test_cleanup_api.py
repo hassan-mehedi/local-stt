@@ -37,16 +37,24 @@ def test_api_cleaner_sends_the_key_model_and_messages(chat_server, monkeypatch):
     url, seen, _ = chat_server
     monkeypatch.setattr(keychain, "get_key", lambda u: "sk-test")
     msgs = [{"role": "user", "content": "ship it"}]
-    assert ApiCleaner(url + "/", "deepseek-chat").complete(msgs, 50) == "Ship it."
+    assert ApiCleaner(url + "/", "deepseek-flash").complete(msgs) == "Ship it."
     assert seen[0]["path"] == "/v1/chat/completions"
     assert seen[0]["auth"] == "Bearer sk-test"
-    assert seen[0]["body"] == {"model": "deepseek-chat", "messages": msgs, "max_tokens": 50, "temperature": 0}
+    assert seen[0]["body"] == {"model": "deepseek-flash", "messages": msgs, "temperature": 0}
+
+
+def test_api_cleaner_turns_off_thinking_for_providers_that_think_by_default(chat_server, monkeypatch):
+    url, seen, _ = chat_server
+    monkeypatch.setattr(keychain, "get_key", lambda u: None)
+    monkeypatch.setitem(api.NO_THINKING, "127.0.0.1", {"thinking": {"type": "disabled"}})
+    ApiCleaner(url, "deepseek-flash").complete([])
+    assert seen[0]["body"]["thinking"] == {"type": "disabled"}
 
 
 def test_api_cleaner_sends_no_auth_header_without_a_key(chat_server, monkeypatch):
     url, seen, _ = chat_server
     monkeypatch.setattr(keychain, "get_key", lambda u: None)
-    ApiCleaner(url, "qwen3").complete([], 10)
+    ApiCleaner(url, "qwen3").complete([])
     assert seen[0]["auth"] is None
 
 
@@ -60,11 +68,11 @@ def test_api_cleaner_reports_the_provider_error(chat_server, monkeypatch, status
     monkeypatch.setattr(keychain, "get_key", lambda u: "sk-test")
     reply.update(status=status, body=body)
     with pytest.raises(ApiError, match=error):
-        ApiCleaner(url, "deepseek-chat").complete([], 10)
+        ApiCleaner(url, "deepseek-flash").complete([])
 
 
 def test_api_cleaner_gives_up_when_nothing_listens(monkeypatch):
     monkeypatch.setattr(keychain, "get_key", lambda u: None)
     monkeypatch.setattr(api, "TIMEOUT_S", 1)
     with pytest.raises(ApiError, match="did not answer"):
-        ApiCleaner("http://127.0.0.1:9/v1", "m").complete([], 10)
+        ApiCleaner("http://127.0.0.1:9/v1", "m").complete([])

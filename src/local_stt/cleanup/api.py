@@ -1,14 +1,24 @@
-"""Cleanup through any OpenAI-compatible chat API: DeepSeek, OpenRouter, Ollama."""
+"""Cleanup through any OpenAI-compatible chat API: DeepSeek, OpenAI, Gemini, Groq, Ollama..."""
 
 from __future__ import annotations
 
 import json
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 from . import keychain
 
 TIMEOUT_S = 10
+
+# These think before they answer unless told not to: seconds of delay for a cleanup.
+# Gemini 3 can't turn it off, so it gets the least.
+NO_THINKING = {
+    "api.deepseek.com": {"thinking": {"type": "disabled"}},
+    "openrouter.ai": {"reasoning": {"enabled": False}},
+    "api.openai.com": {"reasoning_effort": "none"},
+    "generativelanguage.googleapis.com": {"reasoning_effort": "low"},
+}
 
 
 class ApiError(RuntimeError):
@@ -20,14 +30,13 @@ class ApiCleaner:
         self.url = url.rstrip("/")
         self.model = model
 
-    def load(self) -> None:
-        pass
-
-    def unload(self) -> None:
-        pass
-
-    def complete(self, messages: list[dict], max_tokens: int) -> str:
-        body = {"model": self.model, "messages": messages, "max_tokens": max_tokens, "temperature": 0}
+    def complete(self, messages: list[dict]) -> str:
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0,
+            **NO_THINKING.get(urlparse(self.url).hostname, {}),
+        }
         headers = {"Content-Type": "application/json"}
         # Ollama on this machine needs no key
         if key := keychain.get_key(self.url):

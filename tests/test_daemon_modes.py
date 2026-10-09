@@ -136,7 +136,7 @@ class FakeCleaner:
         self.reply, self.error = reply, error
         self.calls = []
 
-    def complete(self, messages, max_tokens):
+    def complete(self, messages):
         self.calls.append(messages)
         if self.error:
             raise self.error

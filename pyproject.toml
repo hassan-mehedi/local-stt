@@ -21,8 +21,6 @@ dependencies = [
     "pyobjc-framework-ServiceManagement>=11; sys_platform == 'darwin'",
     # the cleanup API key, in the Keychain or Secret Service
     "keyring>=25.7",
-    # the cleanup model on the Apple Silicon GPU
-    "mlx-lm>=0.32,<0.33; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 # Note: the tray uses the system PyGObject + Ayatana AppIndicator (GTK3),
 # not a pip package; see ui.tray_gtk._load_gi(). On Mint these ship preinstalled

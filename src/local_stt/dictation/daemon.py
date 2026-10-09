@@ -224,15 +224,6 @@ class DictationDaemon:
             notify("Cleanup failed", str(e))
             return text
 
-    def _load_cleaner(self) -> None:
-        """A cleanup model that fails to load turns cleanup off, not dictation."""
-        try:
-            self.cleaner.load()
-        except Exception as e:
-            log.exception("cleanup model failed to load")
-            notify("Cleanup failed", str(e))
-            self.cleaner = None
-
     def start(self) -> None:
         """Non-blocking. The listener starts first, so a missing permission shows up
         before the model load; a shortcut pressed during the load is queued."""
@@ -250,8 +241,6 @@ class DictationDaemon:
         self.backend.transcribe_audio(
             np.zeros(8000, dtype=np.float32), 16000, TranscribeOptions()
         )
-        if self.cleaner is not None:
-            self._load_cleaner()
         verb = "hold" if self.config.dictation.mode == "hold" else "press"
         log.info("ready: %s %s to dictate", verb, self.config.dictation.hotkey)
 
@@ -272,8 +261,6 @@ class DictationDaemon:
             self._queue.put(None)
             self._worker.join(timeout=30)
             self._worker = None
-        if self.cleaner is not None:
-            self.cleaner.unload()
 
     def run(self) -> None:
         """Blocking foreground mode (stt dictate)."""
