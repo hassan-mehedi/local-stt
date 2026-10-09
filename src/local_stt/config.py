@@ -222,6 +222,8 @@ def save_config(cfg: Config, path: Path | None = None) -> None:
         if table is None:
             table = tomlkit.table()
             doc[section] = table
+        for key in [k for k in table if k not in values]:
+            del table[key]
         for key, value in values.items():
             table[key] = value
 

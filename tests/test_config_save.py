@@ -119,3 +119,12 @@ def test_load_turns_off_a_cleanup_with_no_api(tmp_path):
     assert load_config(path).cleanup.enabled is False
     path.write_text('[cleanup]\nenabled = true\napi_url = "https://api.deepseek.com"\napi_model = "deepseek-flash"\n')
     assert load_config(path).cleanup.enabled is True
+
+
+def test_save_drops_keys_the_config_no_longer_has(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[cleanup]\n# kept\nenabled = false\nprovider = "local"\nmodel = "qwen3-4b"\n\n[extra]\nmine = 1\n')
+    save_config(load_config(path), path)
+    text = path.read_text()
+    assert "provider" not in text and "qwen3-4b" not in text
+    assert "# kept" in text and "mine = 1" in text

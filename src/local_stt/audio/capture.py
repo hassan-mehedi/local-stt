@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 import logging
 import threading
 
@@ -10,6 +11,7 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 TARGET_RATE = 16000
+STOP_TIMEOUT_S = 0.5
 
 
 class Recorder:
@@ -34,13 +36,16 @@ class Recorder:
         with self._lock:
             if self._stream is not None:
                 return
-            self._frames = []
+            frames: list[np.ndarray] = []
+            self._frames = frames
 
-            def callback(indata, frames, time_info, status):
+            def callback(indata, n, time_info, status):
+                if frames is not self._frames:
+                    return  # a stopped stream that is still closing
                 if status:
                     log.debug("capture status: %s", status)
                 block = indata[:, 0].copy()
-                self._frames.append(block)
+                frames.append(block)
                 if self.on_level is not None and len(block):
                     self.on_level(float(np.sqrt(np.mean(block * block))))
 
@@ -63,19 +68,28 @@ class Recorder:
     def stop(self) -> np.ndarray:
         """Stop recording and return 16kHz mono PCM."""
         with self._lock:
-            if self._stream is None:
+            stream, self._stream = self._stream, None
+            if stream is None:
                 return np.zeros(0, dtype=np.float32)
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
-            pcm = (
-                np.concatenate(self._frames)
-                if self._frames
-                else np.zeros(0, dtype=np.float32)
-            )
-            self._frames = []
-        if self._rate != TARGET_RATE and len(pcm):
+            frames, rate = self._frames, self._rate
+        # CoreAudio can hang in stop, and the caller may be the hotkey's event tap
+        closer = threading.Thread(target=_close, args=(stream,), daemon=True)
+        closer.start()
+        closer.join(STOP_TIMEOUT_S)
+        if closer.is_alive():
+            log.warning("the microphone did not stop in %.1fs; thread stacks follow", STOP_TIMEOUT_S)
+            faulthandler.dump_traceback(all_threads=True)
+        with self._lock:
+            if self._frames is frames:
+                self._frames = []
+        pcm = np.concatenate(frames) if frames else np.zeros(0, dtype=np.float32)
+        if rate != TARGET_RATE and len(pcm):
             import soxr
 
-            pcm = soxr.resample(pcm, self._rate, TARGET_RATE)
+            pcm = soxr.resample(pcm, rate, TARGET_RATE)
         return pcm.astype(np.float32, copy=False)
+
+
+def _close(stream) -> None:
+    stream.stop()
+    stream.close()
