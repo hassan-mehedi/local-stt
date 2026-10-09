@@ -6,7 +6,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# canonical modifier names
 _MOD_ALIASES = {
     "super": "super",
     "win": "super",

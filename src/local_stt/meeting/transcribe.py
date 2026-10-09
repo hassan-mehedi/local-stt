@@ -25,10 +25,8 @@ def choose_model(cfg, model: str | None = None, language: str | None = None) -> 
     if language and langs is not None and language not in langs:
         fallback = models.best_for_language(language)
         if fallback is None:
-            raise ValueError(
-                f"No downloaded model transcribes {language!r}. For Bengali: "
-                + models.download_hint("bengali-whisper-medium")
-            )
+            hint = models.download_hint("bengali-whisper-medium") if language == "bn" else ""
+            raise ValueError(f"No downloaded model transcribes {language!r}. {hint}".strip())
         model = fallback
     return model, language
 
@@ -55,8 +53,8 @@ def label(transcript: Transcript, speaker: str) -> Transcript:
 
 
 def merge(mine: Transcript, theirs: Transcript) -> Transcript:
-    """Interleave the Me/Them tracks by timestamp. Both tracks share the
-    PipeWire clock, so timestamps are directly comparable."""
+    """Interleave the Me/Them tracks by timestamp. The recorder starts both
+    tracks at the same moment, so their timestamps line up."""
     segments = sorted(mine.segments + theirs.segments, key=lambda s: (s.start, s.end))
     return Transcript(
         segments=segments,

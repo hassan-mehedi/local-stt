@@ -50,20 +50,6 @@ def open_target(target: str) -> None:
     subprocess.Popen([opener, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def front_app():
-    """The app in front, as a store.FrontApp, or None where unknown."""
-    if sys.platform != "darwin":
-        return None
-    from AppKit import NSWorkspace
-
-    from .store import FrontApp
-
-    app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    if app is None:
-        return None
-    return FrontApp(bundle_id=app.bundleIdentifier(), name=app.localizedName())
-
-
 def app_bundle() -> Path | None:
     """The local-stt.app this runs from, or None for a source install."""
     return next((p for p in Path(__file__).resolve().parents if p.suffix == ".app"), None)

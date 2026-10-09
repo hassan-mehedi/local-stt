@@ -1,7 +1,5 @@
 """Renders the menu bar icons from SF Symbols into src-tauri/icons/tray.
-
-Run from the repo with: uv run python app/scripts/make_tray_icons.py
-"""
+Run from the repo with: uv run python app/scripts/make_tray_icons.py"""
 
 from pathlib import Path
 

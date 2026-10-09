@@ -7,6 +7,7 @@ These rules apply to every change, by a person or an AI tool. If a task conflict
 ## Commands
 
 ```bash
+pnpm -C app install                   # once, before the app commands
 uv run pytest -q                      # Python tests
 uvx ruff check .                      # lint, rules in pyproject.toml
 pnpm -C app exec tsc --noEmit         # type-check the app
@@ -14,13 +15,14 @@ pnpm -C app tauri dev                 # run the app; the engine runs via `uv run
 ./packaging/macos/build.sh            # signed app + dist/local-stt-<version>.dmg
 ```
 
-There is no CI. Run the tests, ruff and tsc yourself before you call a change done. For a change to the app UI, check it in a browser with Playwright too.
+There is no CI. Run the tests, ruff and tsc yourself before you call a change done. For a change to the app UI, check it in a browser with Playwright too: start `uv run stt engine` (its first line has the port and token), run `pnpm -C app dev`, and open `http://localhost:1420/?port=<port>&token=<token>`.
 
 ## Layout
 
-- `src/local_stt/<feature>/` holds one feature each: `audio/`, `dictation/`, `engine/` (speech models), `meeting/`, `ui/` (HTTP server, tray shells).
+- `src/local_stt/<feature>/` holds one feature each: `audio/`, `cleanup/` (the optional AI rewrite and its Keychain key), `dictation/`, `engine/` (speech models), `meeting/`, `ui/` (HTTP server, tray shells).
 - Top-level modules are the entry points and shared state: `cli.py`, `tray.py`, `headless.py` (`stt engine`), `config.py`, `store.py`, `permissions.py`, `desktop.py`, `export.py`.
 - `app/src/` is the React UI: `screens/`, `components/`, `pill/`, `lib/`. `app/src-tauri/src/` is the Rust side: engine process, pill panel, tray.
+- `src/local_stt/ui/static/` is the older browser UI that `stt tray` and `stt settings` serve on Linux and for source installs. The Mac app does not use it.
 - `tests/` is flat, one `test_<module>.py` per module.
 
 ## Structure

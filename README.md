@@ -1,11 +1,14 @@
 # local-stt
 
-Local, offline speech-to-text for Linux and macOS (Apple Silicon). Press a hotkey, speak, press again, and the text appears in whatever app has focus. Also transcribes audio/video files and records meetings (your mic + the other side) with speaker labels. Everything runs on your machine: no cloud, no account, no telemetry.
+Local, offline speech-to-text for Linux and macOS (Apple Silicon). Press a hotkey, speak, press again, and the text appears in whatever app has focus. Also transcribes audio/video files and records meetings (your mic + the other side) with speaker labels. Speech recognition runs on your machine: no account, no telemetry. The one exception is the optional cleanup, which sends the text (never the audio) to an AI API you pick.
+
+Using the Mac app? Read the [user guide](docs/user-guide.md). Want to change the code? Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **Dictation**: global hotkey toggles recording; transcribes and types into the focused window.
 - **File transcription**: any audio/video → `txt` / `md` / `srt` / `vtt` / `json`.
 - **Meetings**: records mic ("Me") and system audio ("Them") as separate tracks, transcribes and merges them. Optional speaker diarization.
 - **Tray app**: status icon + menu, with a browser-based settings page (switch models, rebind the hotkey, manage downloads).
+- **Cleanup** (Mac app, optional): an AI model through an API such as DeepSeek or OpenAI removes filler words and fixes punctuation. The API key stays in the Keychain.
 
 Powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2), which uses your NVIDIA GPU if present and falls back to CPU. On Apple Silicon the default is NVIDIA Parakeet via [parakeet-mlx](https://github.com/senstella/parakeet-mlx), which runs on the Mac's GPU.
 
@@ -110,12 +113,12 @@ Only one tray runs at a time: the service plus a manual `stt tray` won't double 
 Build the DMG once. It needs uv, [pnpm](https://pnpm.io), [Rust](https://rustup.rs) and the Xcode command line tools, and takes about 5 minutes:
 
 ```bash
-./packaging/macos/build.sh    # writes dist/local-stt-0.2.0.dmg
+./packaging/macos/build.sh    # writes dist/local-stt-<version>.dmg
 ```
 
 Open the DMG and drag local-stt into Applications. On first launch a setup window walks you through the model download, the microphone, the two keyboard permissions and a test dictation. The app is a Tauri window around the same engine (`stt engine`), which runs inside the bundle.
 
-While you dictate, a pill at the bottom of the screen shows the mic level; X or Esc throws the clip away. Home keeps every dictation with its recording until you delete it, Meetings plays and searches transcripts, Insights counts words, and Dictionary fixes spellings and expands phrases.
+While you dictate, a pill at the bottom of the screen shows the mic level; X or Esc throws the clip away. Home keeps every dictation with its recording until you delete it, Meetings plays and searches transcripts, Insights counts words, and Dictionary fixes spellings and expands phrases. Settings > Cleanup sets up the optional AI cleanup; the [user guide](docs/user-guide.md#clean-up-what-you-said) walks through it.
 
 **Signing.** There is no Apple developer certificate, so `build.sh` signs with a self-signed identity named "local-stt Dev" from your login keychain if there is one, and ad hoc otherwise. Use the self-signed identity: macOS only passes the Accessibility permission on to the engine, and only keeps permissions across rebuilds, when the signature stays the same. Create it in Keychain Access (Certificate Assistant > Create a Certificate, type Code Signing) or with openssl. On another Mac, right-click the app and pick **Open** the first time.
 
@@ -133,7 +136,7 @@ A mic icon appears in the menu bar: slashed = off, plain = listening, red = reco
 
 ### Permissions
 
-The setup window asks for each one. Grant them to local-stt.app, or for a source install to the app that runs `stt`: your terminal when you run it by hand, or the Python binary named in the error message when it runs as a login agent. Restart local-stt after granting.
+The setup window asks for the first three; System Audio Recording is under Settings > Permissions. Grant them to local-stt.app, or for a source install to the app that runs `stt`: your terminal when you run it by hand, or the Python binary named in the error message when it runs as a login agent. Restart local-stt after granting.
 
 | Permission (System Settings > Privacy & Security) | Needed for |
 |---|---|
@@ -144,7 +147,7 @@ The setup window asks for each one. Grant them to local-stt.app, or for a source
 
 ### Start at login
 
-The app has a checkbox for it on the last page of the setup guide. For a source install, use launchd:
+In the app, turn on Settings > General > Open at login. For a source install, use launchd:
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
@@ -238,6 +241,11 @@ language = ""                 # blank = the [model] language
 
 [diarize]
 hf_token = ""                 # Hugging Face token (or set HF_TOKEN); see below
+
+[cleanup]                     # set up in the Mac app's Settings > Cleanup
+enabled = false
+api_url = ""                  # any OpenAI-compatible API, e.g. "https://api.deepseek.com"
+api_model = ""                # e.g. "deepseek-flash"; the API key lives in the Keychain
 ```
 
 ---
@@ -299,7 +307,7 @@ Without these steps everything else works unchanged. pyannote is never loaded un
 This project targets X11. Wayland support is implemented but **unverified**. To try it:
 
 - **Text output:** `sudo apt install wtype wl-clipboard` (wlroots/KDE compositors) or `ydotool` (any compositor; needs the `ydotoold` daemon).
-- **Hotkeys:** `sudo apt install python3-dev`, add yourself to the `input` group (`sudo usermod -aG input $USER`, then re-login), delete the `override-dependencies` line in `pyproject.toml`, and reinstall with `--extra wayland`.
+- **Hotkeys:** `sudo apt install python3-dev`, add yourself to the `input` group (`sudo usermod -aG input $USER`, then re-login), delete the `override-dependencies` line in `pyproject.toml`, and reinstall with `--extra wayland` and without `--overrides overrides.txt`.
 - Backends are auto-selected per session (`[dictation] listener = "auto"`).
 
 ---
@@ -318,11 +326,15 @@ This project targets X11. Wayland support is implemented but **unverified**. To 
 | **macOS: text never appears** | Allow Accessibility for the app running `stt`, then restart it. |
 | **macOS: "Them" track is silent** | Allow System Audio Recording Only (see [Permissions](#permissions)). |
 
-Logs print to the terminal that launched `stt tray` / `stt dictate`, or to `~/Library/Logs/local-stt.log` under launchd. Add `--debug` for full tracebacks.
+Logs print to the terminal that launched `stt tray` / `stt dictate`, or to `~/Library/Logs/local-stt.log` under launchd. The Mac app logs to `~/Library/Logs/io.github.hassan-mehedi.local-stt/engine.log`. Add `--debug` for full tracebacks.
+
+History and the dictionary live in `~/.local/share/local-stt/history.db`.
 
 ---
 
 ## Development
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers running the Mac app from source, the checks to run and where code goes. The short version:
 
 ```bash
 uv sync --extra cuda --group dev    # on macOS: uv sync --group dev

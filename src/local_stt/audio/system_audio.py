@@ -41,10 +41,6 @@ class PwRecorder:
             start_new_session=True,
         )
 
-    @property
-    def running(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
-
     def stop(self) -> None:
         """SIGINT lets pw-record finalize the wav header."""
         if self._proc is None:

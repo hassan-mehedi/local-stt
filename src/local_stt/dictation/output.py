@@ -1,5 +1,5 @@
 """Types transcribed text into the focused window: xdotool on X11, wtype or
-ydotool on Wayland, pynput on macOS, with a clipboard paste fallback."""
+ydotool on Wayland, pynput on macOS. Clipboard mode pastes it instead."""
 
 from __future__ import annotations
 

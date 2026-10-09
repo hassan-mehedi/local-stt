@@ -90,12 +90,6 @@ class ParakeetMlxBackend(AsrBackend):
 
         mx.clear_cache()
 
-    def is_model_available(self, model: str) -> bool:
-        return models.is_downloaded(model)
-
-    def download_model(self, model: str) -> None:
-        models.download(model)
-
     def transcribe_file(self, path: Path, opts: TranscribeOptions) -> Transcript:
         from ..audio.decode import decode_to_pcm
 

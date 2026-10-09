@@ -86,10 +86,6 @@ class MacSystemAudioRecorder:
             reason = err.strip() or f"no audio within {timeout:.0f}s"
             raise RuntimeError(f"system audio capture did not start: {reason}")
 
-    @property
-    def running(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
-
     def stop(self) -> None:
         if self._proc is None:
             return
@@ -150,10 +146,6 @@ class MicWavRecorder:
             w.setframerate(MIC_RATE)
             while (block := self._blocks.get()) is not None:
                 w.writeframes(block)
-
-    @property
-    def running(self) -> bool:
-        return self._stream is not None
 
     def stop(self) -> None:
         if self._stream is None:

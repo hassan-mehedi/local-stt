@@ -1,7 +1,8 @@
-"""ld-27037 (Xcode CLT 27.0) does not pad the indirect symbol table when it
-has an odd number of entries, so the string table starts 4-byte aligned and
-dyld refuses the file. Pads 4 bytes in front of the string table and
-re-signs. Handles thin 64-bit Mach-O files only."""
+"""Pads 4 bytes in front of the string table of a thin 64-bit Mach-O file
+and re-signs it, so dyld accepts the file."""
+
+# ld-27037 (Xcode CLT 27.0) leaves the indirect symbol table unpadded when it
+# has an odd number of entries, so the string table is only 4-byte aligned.
 
 import struct
 import subprocess

@@ -181,8 +181,6 @@ function flash(text, isErr) {
   if (!isErr) setTimeout(() => { m.textContent = ""; }, 3000);
 }
 
-// -- steps ------------------------------------------------------------------
-
 function show(index) {
   current = Math.max(0, Math.min(index, steps.length - 1));
   const name = steps[current];
@@ -254,8 +252,6 @@ document.getElementById("next").onclick = async () => {
   finally { btn.disabled = false; }
 };
 document.getElementById("back").onclick = () => show(current - 1);
-
-// -- rendering --------------------------------------------------------------
 
 function render() {
   if (!state) return;
@@ -341,8 +337,6 @@ function renderPerms() {
   document.getElementById("loginHint").textContent = login.needs_approval
     ? "Waiting for approval in System Settings > General > Login Items." : "";
 }
-
-// -- data -------------------------------------------------------------------
 
 async function load() {
   const r = await api("/api/state");

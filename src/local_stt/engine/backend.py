@@ -60,11 +60,5 @@ class AsrBackend(ABC):
     ) -> Transcript: ...
 
     @abstractmethod
-    def is_model_available(self, model: str) -> bool: ...
-
-    @abstractmethod
-    def download_model(self, model: str) -> None: ...
-
-    @abstractmethod
     def unload(self) -> None:
         """Free VRAM."""

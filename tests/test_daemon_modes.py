@@ -145,13 +145,13 @@ class FakeCleaner:
 
 def test_finish_text_cleans_with_app_and_words_then_applies_the_dictionary(monkeypatch):
     d = _daemon(monkeypatch, "hold")
-    d.cleaner = FakeCleaner("Pull pro-1285 from Plane.")
-    d.vocabulary = lambda: ["PRO-1285"]
-    d.transform = lambda text: text.replace("pro-1285", "PRO-1285")
-    assert d._finish_text("Um pull Pro 1285 from plane.", FrontApp(None, "Slack")) == "Pull PRO-1285 from Plane. "
+    d.cleaner = FakeCleaner("Update the ios app.")
+    d.vocabulary = lambda: ["iOS"]
+    d.transform = lambda text: text.replace("ios", "iOS")
+    assert d._finish_text("Um update the ios app.", FrontApp(None, "Slack")) == "Update the iOS app. "
     prompt = d.cleaner.calls[0][1]["content"]
-    assert "Slack" in prompt and "PRO-1285" in prompt
-    assert "<transcript>\nPull Pro 1285 from plane.\n</transcript>" in prompt  # fillers go first
+    assert "Slack" in prompt and "iOS" in prompt
+    assert "<transcript>\nUpdate the ios app.\n</transcript>" in prompt  # fillers go first
 
 
 def test_finish_text_types_the_filtered_text_when_cleanup_fails(monkeypatch):

@@ -213,7 +213,8 @@ class EvdevListener:
                 "evdev is required for Wayland hotkeys. Install it with:\n"
                 "  sudo apt install python3-dev\n"
                 "  (then remove the evdev override from pyproject.toml and run)\n"
-                "  uv sync --extra cuda --extra wayland"
+                "  uv sync --extra cuda --extra wayland\n"
+                "  (a uv tool install also drops --overrides overrides.txt)"
             ) from None
         self.hotkey = hotkey
         self.on_activate = on_activate

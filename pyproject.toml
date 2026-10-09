@@ -40,9 +40,10 @@ convert = [
     "transformers>=4.40",
     "torch>=2.2",
 ]
-# Wayland hotkeys need evdev, which the override below excludes (it requires
-# python3-dev to build). To enable: sudo apt install python3-dev, delete the
-# override-dependencies line, then: uv sync --extra cuda --extra wayland
+# Wayland hotkeys need evdev, which the overrides exclude (it needs python3-dev
+# to build). To enable: sudo apt install python3-dev, delete the
+# override-dependencies line below, then: uv sync --extra cuda --extra wayland
+# (a uv tool install also drops --overrides overrides.txt)
 wayland = [
     "evdev>=1.6",
 ]
@@ -61,7 +62,7 @@ packages = ["src/local_stt"]
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
-# app/ holds a whole Python install once packaging/macos/build.sh has run
+# packaging/macos/build.sh puts a whole Python install under app/ while it runs
 testpaths = ["tests"]
 
 [tool.ruff.lint]

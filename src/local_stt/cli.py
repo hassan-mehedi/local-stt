@@ -234,8 +234,6 @@ def cmd_engine(args) -> int:
 
 
 def cmd_settings(args) -> int:
-    import time
-
     from .desktop import open_target
     from .ui.state import read_state
 
