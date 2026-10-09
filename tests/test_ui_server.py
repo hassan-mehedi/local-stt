@@ -180,3 +180,29 @@ def test_relaunch_needs_the_app_bundle(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _req(server, "/api/relaunch", method="POST", body={})
     assert exc.value.code == 400
+
+
+def test_cleanup_key_is_saved_but_never_sent_back(server, memory_keyring):
+    url = "https://api.deepseek.com/v1"
+    status, resp = _req(server, "/api/cleanup/key", "POST", {"url": url, "key": "sk-secret"})
+    assert resp == {"ok": True}
+    assert memory_keyring.items[("local-stt", "api.deepseek.com")] == "sk-secret"
+    _req(server, "/api/config", "POST", {"cleanup": {"api_url": url}})
+    _, state = _req(server, "/api/state")
+    assert state["cleanup"]["key_saved"] is True
+    assert "sk-secret" not in json.dumps(state)
+    _req(server, "/api/cleanup/key/delete", "POST", {"url": url})
+    assert _req(server, "/api/state")[1]["cleanup"]["key_saved"] is False
+
+
+def test_state_lists_the_local_cleanup_models(server, memory_keyring):
+    _, state = _req(server, "/api/state")
+    assert state["cleanup"]["models"][0]["name"] == "qwen3-4b"
+    assert state["cleanup"]["models"][0]["downloaded"] in (True, False)
+
+
+@pytest.mark.parametrize("endpoint", ["/api/cleanup/remove", "/api/cleanup/download"])
+def test_cleanup_model_endpoints_reject_unknown_names(server, endpoint):
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _req(server, endpoint, method="POST", body={"name": "../models"})
+    assert exc.value.code == 400

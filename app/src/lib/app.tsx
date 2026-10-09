@@ -18,7 +18,15 @@ export type Config = {
     min_duration_ms: number; max_duration_ms: number; append_space: boolean; notify: boolean;
   };
   meeting: { output_dir: string; model: string; language: string };
+  cleanup: { enabled: boolean; provider: "local" | "api"; model: string; api_url: string; api_model: string };
   diarize: { hf_token: string };
+};
+
+export type CleanupState = {
+  models: { name: string; label: string; size_mb: number; downloaded: boolean }[];
+  downloading: Record<string, string>;
+  progress: Record<string, number>;
+  key_saved: boolean;
 };
 
 export type AppState = {
@@ -29,6 +37,7 @@ export type AppState = {
   models: ModelInfo[];
   downloading: Record<string, string>;
   progress: Record<string, number | null>;
+  cleanup: CleanupState;
   engine: EngineState;
 };
 
@@ -112,7 +121,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }), [refresh]);
 
   useEffect(() => {
-    if (!state || !Object.values(state.downloading).includes("running")) return;
+    const downloads = state ? [...Object.values(state.downloading), ...Object.values(state.cleanup.downloading)] : [];
+    if (!downloads.includes("running")) return;
     const t = window.setInterval(() => refresh().catch(() => {}), 1000);
     return () => window.clearInterval(t);
   }, [state, refresh]);

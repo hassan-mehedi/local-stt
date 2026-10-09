@@ -216,6 +216,8 @@ select.select {
 .h-time { width: 44px; flex-shrink: 0; padding-top: 2px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .h-app { width: 72px; flex-shrink: 0; padding-top: 2px; font-size: 12px; font-weight: 500; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .h-text { flex-grow: 1; font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.h-raw { font-size: 13px; color: var(--muted); }
+.h-raw button { border: 0; padding: 0; background: none; color: var(--accent); font-size: 13px; cursor: pointer; }
 .h-words { flex-shrink: 0; padding-top: 2px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .h-actions { display: flex; gap: 4px; flex-shrink: 0; }
 

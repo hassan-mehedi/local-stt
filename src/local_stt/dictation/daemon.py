@@ -12,13 +12,14 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..audio.capture import Recorder
+from ..cleanup.rewrite import make_cleaner, rewrite
 from ..config import Config
 from ..desktop import notify
 from ..engine.backend import AsrBackend, TranscribeOptions
 from .hotkey import Hotkey, parse_hotkey
 from .listeners import make_listener
 from .output import make_output
-from .postprocess import postprocess
+from .postprocess import drop_fillers, postprocess
 
 log = logging.getLogger(__name__)
 
@@ -36,12 +37,14 @@ class Utterance:
     elapsed_ms: int
     app: object = None  # whatever front_app() returned when recording began
     error: str | None = None  # set when typing the text failed
+    raw: str = ""  # what the model heard, before any cleanup
 
 
 class DictationDaemon:
     def __init__(
         self, config: Config, backend: AsrBackend, on_state=None, *,
         on_level=None, on_text=None, transform=None, front_app=None,
+        vocabulary=None,
     ):
         self.config = config
         self.backend = backend
@@ -52,6 +55,8 @@ class DictationDaemon:
         self.on_text = on_text  # optional callback(Utterance), after the text is emitted
         self.transform = transform  # optional str -> str, e.g. the dictionary
         self.front_app = front_app  # optional () -> app, read when recording begins
+        self.cleaner = make_cleaner(config.cleanup)
+        self.vocabulary = vocabulary  # optional () -> words the cleanup must spell right
         self._app = None
         self._queue: queue.Queue[tuple[np.ndarray, object] | None] = queue.Queue()
         self._listener = None
@@ -175,7 +180,8 @@ class DictationDaemon:
                 log.exception("transcription failed")
                 self._state("idle")
                 continue
-            text = self._finish_text(transcript.text)
+            heard = postprocess(transcript.text, append_space=False)
+            text = self._finish_text(heard, app)
             elapsed = time.monotonic() - t0
             self._state("idle")
             if not text.strip():
@@ -192,12 +198,14 @@ class DictationDaemon:
                 error = str(e)
             if self.on_text:
                 try:
-                    self.on_text(Utterance(text, pcm, round(elapsed * 1000), app, error))
+                    self.on_text(Utterance(text, pcm, round(elapsed * 1000), app, error, heard))
                 except Exception:
                     log.exception("text callback failed")
 
-    def _finish_text(self, raw: str) -> str:
-        text = postprocess(raw, append_space=False)
+    def _finish_text(self, raw: str, app=None) -> str:
+        text = drop_fillers(postprocess(raw, append_space=False))
+        if self.cleaner and text:
+            text = self._clean(text, app)
         if self.transform and text:
             try:
                 text = self.transform(text)
@@ -206,6 +214,24 @@ class DictationDaemon:
         if text.strip() and self.config.dictation.append_space:
             text += " "
         return text
+
+    def _clean(self, text: str, app) -> str:
+        try:
+            words = self.vocabulary() if self.vocabulary else []
+            return rewrite(self.cleaner, text, getattr(app, "name", None), words)
+        except Exception as e:
+            log.exception("cleanup failed; typing the text without it")
+            notify("Cleanup failed", str(e))
+            return text
+
+    def _load_cleaner(self) -> None:
+        """A cleanup model that fails to load turns cleanup off, not dictation."""
+        try:
+            self.cleaner.load()
+        except Exception as e:
+            log.exception("cleanup model failed to load")
+            notify("Cleanup failed", str(e))
+            self.cleaner = None
 
     def start(self) -> None:
         """Non-blocking. The listener starts first, so a missing permission shows up
@@ -224,6 +250,8 @@ class DictationDaemon:
         self.backend.transcribe_audio(
             np.zeros(8000, dtype=np.float32), 16000, TranscribeOptions()
         )
+        if self.cleaner is not None:
+            self._load_cleaner()
         verb = "hold" if self.config.dictation.mode == "hold" else "press"
         log.info("ready: %s %s to dictate", verb, self.config.dictation.hotkey)
 
@@ -244,6 +272,8 @@ class DictationDaemon:
             self._queue.put(None)
             self._worker.join(timeout=30)
             self._worker = None
+        if self.cleaner is not None:
+            self.cleaner.unload()
 
     def run(self) -> None:
         """Blocking foreground mode (stt dictate)."""

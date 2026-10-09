@@ -2,7 +2,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { ReactNode, useEffect, useState } from "react";
 import { PermissionRows } from "../components/Permissions";
 import { ShortcutField } from "../components/Shortcut";
-import { ModelInfo, useApp } from "../lib/app";
+import { Config, ModelInfo, useApp } from "../lib/app";
 import { api, inTauri } from "../lib/engine";
 import { LANGUAGES, languageName, modelLabel } from "../lib/format";
 import { readPillIdle, writePillIdle } from "../pill/prefs";
@@ -103,6 +103,133 @@ function Models() {
   );
 }
 
+const PRESETS: [string, string, string][] = [
+  ["DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"],
+  ["OpenRouter", "https://openrouter.ai/api/v1", "deepseek/deepseek-chat"],
+  ["Ollama", "http://localhost:11434/v1", ""],
+];
+
+type TestResult = { ok: boolean; text?: string; error?: string };
+
+function Cleanup() {
+  const { state, saveConfig, refresh, toast } = useApp();
+  const [url, setUrl] = useState("");
+  const [model, setModel] = useState("");
+  const [key, setKey] = useState("");
+  const [test, setTest] = useState<TestResult | "running" | null>(null);
+  const saved = state?.config.cleanup;
+  useEffect(() => {
+    if (!saved) return;
+    setUrl(saved.api_url);
+    setModel(saved.api_model);
+  }, [saved?.api_url, saved?.api_model]);
+
+  if (!state || !saved) return null;
+  const c = saved;
+  const local = state.cleanup.models.find((m) => m.name === c.model);
+  const status = state.cleanup.downloading[c.model];
+  const progress = Math.round((state.cleanup.progress[c.model] ?? 0) * 100);
+  const readyFor = (provider: Config["cleanup"]["provider"]) =>
+    provider === "local" ? !!local?.downloaded : !!(c.api_url && c.api_model);
+  const ready = readyFor(c.provider);
+
+  async function call(path: string, body: object, done?: string) {
+    try {
+      await api(path, body);
+      await refresh();
+      if (done) toast(done);
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  }
+
+  async function saveApi(e: React.FormEvent) {
+    e.preventDefault();
+    if (!(await saveConfig({ cleanup: { api_url: url.trim(), api_model: model.trim() } }))) return;
+    if (key.trim()) {
+      await call("/api/cleanup/key", { url: url.trim(), key }, "Key saved in the Keychain");
+      setKey("");
+    }
+    setTest(null);
+  }
+
+  async function runTest() {
+    setTest("running");
+    try {
+      setTest(await api<TestResult>("/api/cleanup/test", { url: c.api_url, model: c.api_model }));
+    } catch (e) {
+      setTest({ ok: false, error: (e as Error).message });
+    }
+  }
+
+  const changed = url.trim() !== c.api_url || model.trim() !== c.api_model || key.trim() !== "";
+
+  return (
+    <>
+      <Row title="Clean up each dictation" hint={ready || c.enabled
+        ? "An AI model removes um, like and false starts, fixes punctuation and writes lists. History keeps what you said."
+        : c.provider === "local" ? "Download the model below first." : "Fill in the API below first."}>
+        <Toggle label="Clean up each dictation" checked={c.enabled} onChange={(enabled) => (ready || !enabled) && saveConfig({ cleanup: { enabled } })} />
+      </Row>
+      <Row title="Where it runs" hint={c.provider === "local" ? "On this Mac. Nothing leaves it." : "Your text, not your audio, goes to the API you choose."}>
+        <Segmented label="Where cleanup runs" value={c.provider}
+          onChange={(provider) => saveConfig({ cleanup: { provider, enabled: c.enabled && readyFor(provider) } })}
+          options={[["local", "On this Mac"], ["api", "API"]]} />
+      </Row>
+      {c.provider === "local" && local && (
+        <div className="model">
+          <div className="stack gap-4" style={{ flexGrow: 1, minWidth: 0 }}>
+            <div className="row gap-8">
+              <span className="model-name">{local.label}</span>
+              {local.downloaded && c.enabled && <span className="badge ok">In use</span>}
+            </div>
+            <span className="muted" style={{ fontSize: 12.5 }}>English · {size(local.size_mb)}</span>
+            {status === "running" && <div className="progress" style={{ marginTop: 4 }}><span style={{ width: `${progress}%` }} /></div>}
+            {status?.startsWith("error") && <span className="error-text">{status.slice(7)}</span>}
+          </div>
+          {status === "running" ? <span className="muted mono" style={{ fontSize: 12 }}>{progress}%</span>
+            : !local.downloaded ? <button className="btn small" onClick={() => call("/api/cleanup/download", { name: local.name })}>Download</button>
+            : !c.enabled ? <button className="btn small danger" onClick={() => call("/api/cleanup/remove", { name: local.name })}>Remove</button>
+            : null}
+        </div>
+      )}
+      {c.provider === "api" && (
+        <form className="stack gap-12" style={{ paddingTop: 12 }} onSubmit={saveApi}>
+          <div className="row gap-8">
+            <span className="muted" style={{ fontSize: 12.5 }}>Fill in for</span>
+            {PRESETS.map(([name, presetUrl, presetModel]) => (
+              <button key={name} type="button" className="btn small" onClick={() => { setUrl(presetUrl); setModel(presetModel); }}>{name}</button>
+            ))}
+          </div>
+          <label className="field" style={{ height: 36 }}>
+            <input aria-label="API URL" placeholder="API URL, e.g. https://api.deepseek.com/v1" value={url} onChange={(e) => setUrl(e.target.value)} />
+          </label>
+          <label className="field" style={{ height: 36 }}>
+            <input aria-label="API model" placeholder="Model, e.g. deepseek-chat" value={model} onChange={(e) => setModel(e.target.value)} />
+          </label>
+          <label className="field" style={{ height: 36 }}>
+            <input aria-label="API key" type="password" autoComplete="off"
+              placeholder={state.cleanup.key_saved ? "Key saved in the Keychain. Type to replace it." : "API key (none needed for Ollama)"}
+              value={key} onChange={(e) => setKey(e.target.value)} />
+          </label>
+          <div className="row gap-8">
+            <button className="btn small primary" disabled={!changed}>Save</button>
+            <button type="button" className="btn small" disabled={!c.api_url || !c.api_model || changed || test === "running"} onClick={runTest}>
+              {test === "running" ? "Testing..." : "Test"}
+            </button>
+            {state.cleanup.key_saved && (
+              <button type="button" className="btn small danger" onClick={() => call("/api/cleanup/key/delete", { url: c.api_url }, "Key removed")}>Remove key</button>
+            )}
+          </div>
+          {test && test !== "running" && (test.ok
+            ? <span style={{ fontSize: 13 }}>Works. "um so this is uh a test of the the cleanup" became "{test.text}"</span>
+            : <span className="error-text">{test.error}</span>)}
+        </form>
+      )}
+    </>
+  );
+}
+
 export default function Settings() {
   const { state, saveConfig } = useApp();
   const [autostart, setAutostart] = useState(false);
@@ -151,6 +278,11 @@ export default function Settings() {
             {langs.map((code) => <option key={code} value={code}>{languageName(code)}</option>)}
           </select>
         </Row>
+      </section>
+
+      <section className="card card-pad stack" aria-label="Cleanup">
+        <h2 style={{ marginBottom: 14 }}>Cleanup</h2>
+        <Cleanup />
       </section>
 
       <section className="card card-pad stack" aria-label="Models">

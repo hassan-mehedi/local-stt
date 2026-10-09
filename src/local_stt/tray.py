@@ -153,7 +153,9 @@ class TrayApp:
         """Adopts validated config and restarts a running daemon in place, so changes
         apply without a logout. Returns an error message if the restart failed."""
         with self._lock:
-            unchanged = (cfg.model, cfg.dictation) == (self.config.model, self.config.dictation)
+            unchanged = (cfg.model, cfg.dictation, cfg.cleanup) == (
+                self.config.model, self.config.dictation, self.config.cleanup
+            )
             self.config = cfg
             if self._daemon is None or unchanged:
                 return None

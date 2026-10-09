@@ -76,8 +76,8 @@ export default function Home() {
     toast("Deleted");
   }
 
-  async function copy(item: HistoryItem) {
-    await navigator.clipboard.writeText(item.text);
+  async function copy(text: string) {
+    await navigator.clipboard.writeText(text);
     toast("Copied");
   }
 
@@ -157,10 +157,18 @@ export default function Home() {
                     onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && setSelected(isSelected ? null : item.id)}>
                     <span className="h-time">{clock(new Date(item.created_at * 1000))}</span>
                     <span className="h-app" title={item.app_name ?? ""}>{item.app_name ?? "-"}</span>
-                    <span className="h-text selectable">{item.text}</span>
+                    <div className="h-text stack gap-4">
+                      <span className="selectable">{item.text}</span>
+                      {isSelected && item.raw_text && (
+                        <span className="h-raw selectable">
+                          You said: {item.raw_text}{" "}
+                          <button onClick={(e) => { e.stopPropagation(); copy(item.raw_text!); }}>Copy</button>
+                        </span>
+                      )}
+                    </div>
                     {isSelected ? (
                       <div className="h-actions" onClick={(e) => e.stopPropagation()}>
-                        <button className="icon-btn" aria-label="Copy" title="Copy" onClick={() => copy(item)}><Icon name="copy" size={14} /></button>
+                        <button className="icon-btn" aria-label="Copy" title="Copy" onClick={() => copy(item.text)}><Icon name="copy" size={14} /></button>
                         {item.has_audio ? (
                           <button className="icon-btn" aria-label={playing === item.id ? "Stop" : "Play recording"} title="Play recording" onClick={() => play(item)}>
                             <Icon name={playing === item.id ? "pause" : "play"} size={12} />

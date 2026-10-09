@@ -106,3 +106,35 @@ def test_apply_dictionary(heard, expected):
         "snippets": [{"phrase": "new paragraph", "value": "\\n\\n"}],
     }
     assert apply_dictionary(heard, entries) == expected
+
+
+def test_store_keeps_raw_text_when_cleanup_changed_it(store):
+    cleaned = store.add_dictation("Pull PRO-1285.", 1000, 100, raw_text="Um pull Pro 1285.")
+    same = store.add_dictation("Ship it.", 1000, 100, raw_text="Ship it.")
+    assert cleaned["raw_text"] == "Um pull Pro 1285."
+    assert same["raw_text"] is None
+    assert [r["text"] for r in store.history(query="pro 1285")["items"]] == ["Pull PRO-1285."]
+
+
+def test_store_upgrades_a_file_from_before_raw_text(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE dictations (id INTEGER PRIMARY KEY, created_at REAL NOT NULL,"
+        " text TEXT NOT NULL, words INTEGER NOT NULL, audio_ms INTEGER NOT NULL,"
+        " elapsed_ms INTEGER NOT NULL, app_id TEXT, app_name TEXT,"
+        " has_audio INTEGER NOT NULL DEFAULT 0);"
+        "INSERT INTO dictations (created_at, text, words, audio_ms, elapsed_ms)"
+        " VALUES (1, 'old note', 2, 1000, 100);"
+    )
+    db.close()
+    s = Store(path)
+    try:
+        assert s.history()["items"][0]["raw_text"] is None
+        assert s.add_dictation("new", 1, 1, raw_text="nu")["raw_text"] == "nu"
+    finally:
+        s.close()
+    s = Store(path)  # opening again must not repeat the upgrade
+    s.close()

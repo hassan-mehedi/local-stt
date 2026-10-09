@@ -88,3 +88,29 @@ def test_validate_rejects_parakeet_off_apple_silicon(monkeypatch):
     cfg.model.name = "parakeet-tdt-0.6b-v3"
     with pytest.raises(ConfigError, match="Apple Silicon"):
         validate(cfg)
+
+
+@pytest.mark.parametrize("changes, error", [
+    ({"provider": "cloud"}, "provider"),
+    ({"model": "gpt-9"}, "Unknown cleanup model"),
+    ({"provider": "api", "api_url": "", "api_model": "deepseek-chat"}, "API URL"),
+    ({"provider": "api", "api_url": "ftp://x", "api_model": "m"}, "http"),
+    ({"provider": "api", "api_url": "http://api.deepseek.com/v1", "api_model": "m"}, "https"),
+    ({"provider": "api", "api_url": "https://api.deepseek.com/v1", "api_model": ""}, "model name"),
+    ({"provider": "api", "api_url": "https://api.deepseek.com/v1", "api_model": "deepseek-chat"}, None),
+    ({"provider": "api", "api_url": "http://localhost:11434/v1", "api_model": "qwen3"}, None),
+    ({}, None),
+])
+def test_validate_checks_cleanup_settings(monkeypatch, changes, error):
+    import local_stt.engine.models as models
+
+    monkeypatch.setattr(models, "is_apple_silicon", lambda: True)
+    cfg = Config()
+    cfg.cleanup.enabled = True
+    for key, value in changes.items():
+        setattr(cfg.cleanup, key, value)
+    if error is None:
+        assert validate(cfg)
+    else:
+        with pytest.raises(ConfigError, match=error):
+            validate(cfg)

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import logging
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 
-from . import models
+from . import mlx_thread, models
 from .backend import AsrBackend, Segment, Transcript, TranscribeOptions, Word
 
 log = logging.getLogger(__name__)
@@ -34,24 +32,16 @@ def _words(tokens) -> list[Word]:
 
 
 class ParakeetMlxBackend(AsrBackend):
-    """Runs all MLX work on one thread: MLX binds streams to the thread that made
-    them, and the tray loads and transcribes on different threads."""
+    """Runs all MLX work on the MLX thread, since the tray loads and transcribes
+    on different threads."""
 
     def __init__(self, model_name: str = "parakeet-tdt-0.6b-v3"):
         self.model_name = model_name
         self.spec = models.spec(model_name)
         self._model = None
-        self._executor: ThreadPoolExecutor | None = None
-        self._executor_lock = threading.Lock()
 
     def _on_mlx_thread(self, fn, *args):
-        with self._executor_lock:
-            if self._executor is None:
-                self._executor = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="mlx"
-                )
-            executor = self._executor
-        return executor.submit(fn, *args).result()
+        return mlx_thread.run(fn, *args)
 
     def load(self):
         return self._on_mlx_thread(self._load)
@@ -77,12 +67,8 @@ class ParakeetMlxBackend(AsrBackend):
         return self._model
 
     def unload(self) -> None:
-        with self._executor_lock:
-            executor, self._executor = self._executor, None
-        if executor is None:
-            return
-        executor.submit(self._unload).result()
-        executor.shutdown()
+        if self._model is not None:
+            self._on_mlx_thread(self._unload)
 
     def _unload(self) -> None:
         self._model = None

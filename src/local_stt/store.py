@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS dictionary (
 );
 """
 
+# each step upgrades a file from PRAGMA user_version i to i + 1
+_UPGRADES = [
+    "ALTER TABLE dictations ADD COLUMN raw_text TEXT",
+]
+
 
 def count_words(text: str) -> int:
     return len(text.split())
@@ -65,6 +70,14 @@ class Store:
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(_SCHEMA)
+        self._upgrade()
+
+    def _upgrade(self) -> None:
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        for step, sql in enumerate(_UPGRADES[version:], start=version + 1):
+            with self._db:
+                self._db.execute(sql)
+                self._db.execute(f"PRAGMA user_version = {step}")
 
     def close(self) -> None:
         with self._lock:
@@ -86,14 +99,17 @@ class Store:
         app: FrontApp | None = None,
         pcm: np.ndarray | None = None,
         created_at: float | None = None,
+        raw_text: str | None = None,
     ) -> dict:
+        """raw_text is what the model heard, kept only when cleanup changed it."""
         text = text.strip()
+        raw_text = raw_text.strip() if raw_text and raw_text.strip() != text else None
         row_id = self._write(
             "INSERT INTO dictations (created_at, text, words, audio_ms, elapsed_ms,"
-            " app_id, app_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " app_id, app_name, raw_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 created_at or time.time(), text, count_words(text), audio_ms, elapsed_ms,
-                app.bundle_id if app else None, app.name if app else None,
+                app.bundle_id if app else None, app.name if app else None, raw_text,
             ),
         )
         if pcm is not None and len(pcm):
@@ -122,8 +138,11 @@ class Store:
         sql, args = "SELECT * FROM dictations WHERE 1 = 1", []
         if query:
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            sql += " AND (text LIKE ? ESCAPE '\\' OR app_name LIKE ? ESCAPE '\\')"
-            args += [f"%{escaped}%"] * 2
+            sql += (
+                " AND (text LIKE ? ESCAPE '\\' OR raw_text LIKE ? ESCAPE '\\'"
+                " OR app_name LIKE ? ESCAPE '\\')"
+            )
+            args += [f"%{escaped}%"] * 3
         if before is not None:
             sql += " AND id < ?"
             args.append(before)

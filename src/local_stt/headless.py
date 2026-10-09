@@ -166,7 +166,7 @@ class EngineApp(tray.TrayApp):
     def _on_text(self, utt) -> None:
         row = self.store.add_dictation(
             utt.text, audio_ms=round(len(utt.pcm) / 16), elapsed_ms=utt.elapsed_ms,
-            app=utt.app, pcm=utt.pcm,
+            app=utt.app, pcm=utt.pcm, raw_text=utt.raw,
         )
         self.events.publish("dictation", {"item": row, "error": utt.error})
         if utt.error:
@@ -191,6 +191,7 @@ class EngineApp(tray.TrayApp):
             "on_text": self._on_text,
             "transform": self.store.apply_dictionary,
             "front_app": self._front_app,
+            "vocabulary": lambda: [e["phrase"] for e in self.store.dictionary()["words"]],
         }
 
     def _start_daemon_locked(self, notify: bool = True) -> str | None:

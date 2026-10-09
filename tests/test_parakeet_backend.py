@@ -80,12 +80,11 @@ def test_load_and_transcribe_share_one_thread_across_callers():
     assert out["t"].language == "en"  # v2 is English-only
 
 
-def test_unload_stops_the_worker_and_reload_starts_a_new_one():
+def test_unload_and_reload_stay_on_the_mlx_thread():
     b = FakeParakeet()
     b.load()
-    first = b.threads[-1]
     b.unload()
-    assert b._executor is None
+    assert b._model is None
     b.load()
-    assert b.threads[-1] != first
+    assert len(set(b.threads)) == 1
     b.unload()

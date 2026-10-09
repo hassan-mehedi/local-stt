@@ -29,6 +29,7 @@ export type HistoryItem = {
   app_id: string | null;
   app_name: string | null;
   has_audio: number;
+  raw_text: string | null;
 };
 
 export type Notice = { title: string; body: string; level: "error" | "info"; action: string | null };
