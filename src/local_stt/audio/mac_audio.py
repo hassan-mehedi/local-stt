@@ -14,13 +14,13 @@ import wave
 from pathlib import Path
 
 from ..config import CACHE_DIR
+from .decode import SAMPLE_RATE
 
 log = logging.getLogger(__name__)
 
 HELPER_SOURCE = Path(__file__).parent / "macos" / "system_audio_capture.swift"
 BUNDLED_HELPER = HELPER_SOURCE.with_name("system-audio-capture")
 HELPER_DIR = CACHE_DIR / "bin"
-MIC_RATE = 16000
 
 
 def helper_path() -> Path:
@@ -132,7 +132,7 @@ class MicWavRecorder:
             self._blocks.put(bytes(indata))
 
         self._stream = sd.RawInputStream(
-            samplerate=MIC_RATE, channels=1, dtype="int16",
+            samplerate=SAMPLE_RATE, channels=1, dtype="int16",
             device=self.device, callback=callback,
         )
         self._writer = threading.Thread(target=self._write, daemon=True)
@@ -143,7 +143,7 @@ class MicWavRecorder:
         with wave.open(str(self.dest), "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
-            w.setframerate(MIC_RATE)
+            w.setframerate(SAMPLE_RATE)
             while (block := self._blocks.get()) is not None:
                 w.writeframes(block)
 

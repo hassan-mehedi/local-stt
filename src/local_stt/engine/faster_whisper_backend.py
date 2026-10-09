@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..audio.decode import SAMPLE_RATE
 from . import models
 from .backend import AsrBackend, Segment, Transcript, TranscribeOptions, Word
 
@@ -101,15 +102,15 @@ class FasterWhisperBackend(AsrBackend):
         from ..audio.decode import decode_to_pcm
 
         pcm = decode_to_pcm(path)
-        return self.transcribe_audio(pcm, 16000, opts)
+        return self.transcribe_audio(pcm, SAMPLE_RATE, opts)
 
     def transcribe_audio(
         self, pcm: np.ndarray, sample_rate: int, opts: TranscribeOptions
     ) -> Transcript:
-        if sample_rate != 16000:
+        if sample_rate != SAMPLE_RATE:
             raise ValueError(f"expected 16kHz audio, got {sample_rate}")
         model = self.load()
-        duration = len(pcm) / 16000.0
+        duration = len(pcm) / SAMPLE_RATE
         language = opts.language or None
 
         kwargs = dict(

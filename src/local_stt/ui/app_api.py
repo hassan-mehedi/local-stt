@@ -4,14 +4,11 @@ object, or a FileReply for audio."""
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import permissions
-from ..export import FORMATS, export
+from ..desktop import open_target, reveal
 from ..meeting import library
 
 
@@ -92,16 +89,19 @@ def handle_post(controller, path: str, body: dict):
         controller.retranscribe_meeting(body["id"])
         return {"ok": True}
     if path == "/api/meetings/reveal":
-        folder = library.session_dir(controller.meetings_dir(), body.get("id", ""))
-        _reveal(folder)
+        reveal(library.session_dir(controller.meetings_dir(), body.get("id", "")))
         return {"ok": True}
     if path == "/api/meetings/open-folder":
         folder = controller.meetings_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        _reveal(folder, select=False)
+        open_target(str(folder))
         return {"ok": True}
     if path == "/api/meetings/export":
-        return _export_meeting(controller, body)
+        dest = library.export_session(
+            controller.meetings_dir(), body.get("id", ""), body.get("format", ""),
+            Path(body.get("dest", "")).expanduser(),
+        )
+        return {"ok": True, "path": str(dest)}
     if path == "/api/history/delete":
         return {"ok": store.delete_dictation(_int(body.get("id"), "id"))}
     if path == "/api/history/paste":
@@ -124,29 +124,3 @@ def handle_post(controller, path: str, body: dict):
         return {"ok": True}
     return None
 
-
-def _reveal(path: Path, select: bool = True) -> None:
-    if sys.platform == "darwin":
-        subprocess.Popen(["open", "-R", str(path)] if select else ["open", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path if not select else path.parent)])
-
-
-def _export_meeting(controller, body: dict) -> dict:
-    fmt = body.get("format", "")
-    if fmt not in FORMATS:
-        raise ValueError(f"unknown format {fmt!r}")
-    dest = Path(body.get("dest", "")).expanduser()
-    if not dest.is_absolute():
-        raise ValueError("pick where to save the file")
-    folder = library.session_dir(controller.meetings_dir(), body.get("id", ""))
-    existing = folder / f"transcript.{fmt}"
-    if existing.exists():
-        shutil.copyfile(existing, dest)
-    else:
-        transcript = library.load_transcript(folder)
-        if transcript is None:
-            raise ValueError("this meeting has no transcript yet")
-        title = library.session_detail(controller.meetings_dir(), folder.name)["title"]
-        export(transcript, fmt, dest, title=title)
-    return {"ok": True, "path": str(dest)}

@@ -128,8 +128,8 @@ def _get_raw(srv, path):
 
 @pytest.mark.parametrize("path, kind, marker", [
     ("/onboarding", "text/html", "Welcome to local-stt"),
-    ("/static/common.js", "text/javascript", "function hotkeyCapture"),
-    ("/static/common.css", "text/css", ".model"),
+    ("/static/controls.js", "text/javascript", "function hotkeyCapture"),
+    ("/static/base.css", "text/css", ".model"),
 ])
 def test_pages_and_assets_load_without_the_token(server, path, kind, marker):
     status, content_type, body = _get_raw(server, path)

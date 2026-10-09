@@ -3,9 +3,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from local_stt.cli import _build_backend
 from local_stt.config import Config
-from local_stt.engine.backend import TranscribeOptions, Word
+from local_stt.engine.backend import TranscribeOptions, Word, build_backend
 from local_stt.engine.faster_whisper_backend import FasterWhisperBackend
 from local_stt.engine.parakeet_mlx_backend import ParakeetMlxBackend, _words
 
@@ -28,9 +27,9 @@ def test_words_join_subword_tokens():
 def test_build_backend_picks_engine_by_model_family():
     cfg = Config()
     cfg.model.name = "large-v3-turbo"
-    assert isinstance(_build_backend(cfg), FasterWhisperBackend)
+    assert isinstance(build_backend(cfg), FasterWhisperBackend)
     assert isinstance(
-        _build_backend(cfg, model_override="parakeet-tdt-0.6b-v3"), ParakeetMlxBackend
+        build_backend(cfg, "parakeet-tdt-0.6b-v3"), ParakeetMlxBackend
     )
 
 

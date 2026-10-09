@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import wave
 from datetime import datetime
@@ -12,8 +13,10 @@ from pathlib import Path
 
 import numpy as np
 
+from ..audio.decode import write_wav
 from ..config import CACHE_DIR
 from ..engine.backend import Segment, Transcript
+from ..export import FORMATS, export
 from .transcribe import load_settings
 
 MIX_DIR = CACHE_DIR / "mix"
@@ -127,6 +130,24 @@ def session_detail(output_dir: Path, session_id: str, active: dict | None = None
     return detail
 
 
+def export_session(output_dir: Path, session_id: str, fmt: str, dest: Path) -> Path:
+    """Writes the session's transcript as `fmt` to dest, copying the saved file when there is one."""
+    if fmt not in FORMATS:
+        raise ValueError(f"unknown format {fmt!r}")
+    if not dest.is_absolute():
+        raise ValueError("pick where to save the file")
+    folder = session_dir(output_dir, session_id)
+    existing = folder / f"transcript.{fmt}"
+    if existing.exists():
+        shutil.copyfile(existing, dest)
+        return dest
+    transcript = load_transcript(folder)
+    if transcript is None:
+        raise ValueError("this meeting has no transcript yet")
+    export(transcript, fmt, dest, title=session_detail(output_dir, folder.name)["title"])
+    return dest
+
+
 def mixed_audio(output_dir: Path, session_id: str) -> Path:
     """Both tracks mixed to one 16 kHz WAV, cached until a track changes."""
     with _mix_lock:
@@ -154,11 +175,7 @@ def _mixed_audio(output_dir: Path, session_id: str) -> Path:
     for old in MIX_DIR.glob(f"{session_id}-*.wav"):
         old.unlink(missing_ok=True)
     tmp = dest.with_suffix(".tmp")
-    with wave.open(str(tmp), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(16000)
-        w.writeframes((mix * 32767).astype("<i2").tobytes())
+    write_wav(tmp, mix)
     tmp.replace(dest)
     return dest
 

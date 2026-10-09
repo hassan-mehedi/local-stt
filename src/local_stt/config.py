@@ -6,7 +6,7 @@ import json
 import platform
 import sys
 import tomllib
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".config" / "local-stt" / "config.toml"
@@ -101,6 +101,16 @@ def mark_onboarding_done() -> None:
 def _section(cls, data: dict):
     known = {f.name for f in fields(cls)}
     return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def merge_config(base: Config, sections: dict) -> Config:
+    """`base` with posted sections laid over it; unknown keys are ignored."""
+    return Config(**{
+        f.name: _section(
+            type(getattr(base, f.name)), {**asdict(getattr(base, f.name)), **sections.get(f.name, {})}
+        )
+        for f in fields(Config)
+    })
 
 
 def load_config(path: Path | None = None) -> Config:

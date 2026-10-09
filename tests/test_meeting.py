@@ -1,8 +1,12 @@
 import time
 
+import pytest
+
+import local_stt.engine.models as models
+from local_stt.config import Config
 from local_stt.engine.backend import Segment, Transcript
 from local_stt.meeting.recorder import slugify
-from local_stt.meeting.transcribe import label, merge
+from local_stt.meeting.transcribe import choose_model, label, load_settings, merge, save_settings
 
 
 def _t(segs, duration=10.0):
@@ -40,13 +44,6 @@ def test_merge_empty_track():
     assert merged.segments[0].speaker == "Me"
 
 
-import pytest  # noqa: E402
-
-import local_stt.engine.models as models  # noqa: E402
-from local_stt.config import Config  # noqa: E402
-from local_stt.meeting.transcribe import (  # noqa: E402
-    choose_model, load_settings, save_settings,
-)
 
 
 @pytest.fixture
@@ -145,8 +142,8 @@ class _FakeBackend:
 
 
 def test_failed_dictation_start_frees_the_model(monkeypatch):
-    import local_stt.cli as cli
     import local_stt.dictation.daemon as daemon_mod
+    import local_stt.engine.backend as asr
     from local_stt.tray import TrayApp
 
     backend = _FakeBackend()
@@ -162,7 +159,7 @@ def test_failed_dictation_start_frees_the_model(monkeypatch):
         def stop(self):
             stopped.append(True)
 
-    monkeypatch.setattr(cli, "_build_backend", lambda cfg: backend)
+    monkeypatch.setattr(asr, "build_backend", lambda cfg: backend)
     monkeypatch.setattr(daemon_mod, "DictationDaemon", FailingDaemon)
     monkeypatch.setattr("local_stt.tray._notify", lambda *a: None)
     app = TrayApp(_cfg())
@@ -191,3 +188,15 @@ def test_saving_meeting_settings_keeps_dictation_running(monkeypatch):
     cfg.dictation.hotkey = "alt_r"
     app.apply_config(cfg)
     assert restarts == ["stop", "start"]
+
+
+def test_tray_reports_a_failure_when_a_meeting_track_is_missing(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from local_stt.tray import TrayApp
+
+    notices = []
+    monkeypatch.setattr("local_stt.tray._notify", lambda *a: notices.append(a[0]))
+    rec = SimpleNamespace(session_dir=tmp_path, title="standup", model="parakeet-tdt-0.6b-v2")
+    TrayApp(_cfg())._transcribe_meeting(rec)
+    assert notices == ["Transcription failed"]

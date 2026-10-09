@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>local-stt settings</title>
-<link rel="stylesheet" href="/static/common.css">
+<link rel="stylesheet" href="/static/base.css">
 <style>
   header {
     display: flex; align-items: center; justify-content: space-between;
@@ -56,6 +56,30 @@
   </section>
 
   <section>
+    <h2>Cleanup</h2>
+    <div class="hint">An AI model removes um, like and false starts and fixes punctuation. Your text, not your audio, goes to the API. Any OpenAI-compatible API works, such as https://api.deepseek.com with deepseek-flash.</div>
+    <div class="row" style="margin-top:12px">
+      <label class="name">Clean up</label>
+      <div class="seg" id="cleanup">
+        <button data-v="off">off</button><button data-v="on">on</button>
+      </div>
+    </div>
+    <div class="row">
+      <label class="name">API URL</label>
+      <input type="text" class="grow" id="api_url" placeholder="https://api.deepseek.com">
+    </div>
+    <div class="row">
+      <label class="name">Model</label>
+      <input type="text" class="grow" id="api_model" placeholder="deepseek-flash">
+    </div>
+    <div class="row">
+      <label class="name">API key</label>
+      <input type="password" class="grow" id="api_key" autocomplete="off">
+      <button class="btn" id="test">Test</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Meetings</h2>
     <div class="row">
       <label class="name">Folder</label>
@@ -74,10 +98,10 @@
   </footer>
 </div>
 
-<script src="/static/common.js"></script>
+<script src="/static/controls.js"></script>
 <script>
 let state = null;
-const draft = { model: {}, dictation: {}, meeting: {}, diarize: {} };
+const draft = { model: {}, dictation: {}, meeting: {}, cleanup: {}, diarize: {} };
 
 function drawModels() {
   renderModels(document.getElementById("models"), state, {
@@ -98,11 +122,18 @@ function render() {
   document.getElementById("language").value = c.model.language;
   document.getElementById("output_dir").value = c.meeting.output_dir;
   document.getElementById("hf_token").value = c.diarize.hf_token;
+  setSeg("cleanup", c.cleanup.enabled ? "on" : "off");
+  document.getElementById("api_url").value = c.cleanup.api_url;
+  document.getElementById("api_model").value = c.cleanup.api_model;
+  document.getElementById("api_key").value = "";
+  document.getElementById("api_key").placeholder = state.cleanup.key_saved
+    ? "Saved in the keyring. Type to replace it." : "API key (none for Ollama)";
   drawModels();
 }
 
 bindSeg("mode", v => { draft.dictation.mode = v; });
 bindSeg("output", v => { draft.dictation.output = v; });
+bindSeg("cleanup", v => { draft.cleanup.enabled = v === "on"; });
 const setHotkey = hotkeyCapture(
   document.getElementById("hotkey"), document.getElementById("hkHint"),
   raw => { draft.dictation.hotkey = raw; },
@@ -113,13 +144,17 @@ function collect() {
   draft.model.language = document.getElementById("language").value.trim();
   draft.meeting.output_dir = document.getElementById("output_dir").value.trim();
   draft.diarize.hf_token = document.getElementById("hf_token").value.trim();
+  draft.cleanup.api_url = document.getElementById("api_url").value.trim();
+  draft.cleanup.api_model = document.getElementById("api_model").value.trim();
   return draft;
 }
 
+let flashTimer;
 function flash(text, isErr) {
   const m = document.getElementById("msg");
   m.textContent = text; m.className = "msg " + (isErr ? "err" : "ok");
-  if (!isErr) setTimeout(() => { m.textContent = ""; }, 3000);
+  clearTimeout(flashTimer);
+  if (!isErr) flashTimer = setTimeout(() => { m.textContent = ""; }, 3000);
 }
 
 document.getElementById("apply").onclick = async () => {
@@ -129,9 +164,27 @@ document.getElementById("apply").onclick = async () => {
     const r = await post("/api/config", collect());
     const data = await r.json();
     if (!r.ok) return flash(data.error || "save failed", true);
+    const key = document.getElementById("api_key").value.trim();
+    if (key) {
+      const k = await post("/api/cleanup/key", { url: draft.cleanup.api_url, key });
+      if (!k.ok) return flash((await k.json()).error || "saving the key failed", true);
+    }
     if (data.reload_error) flash("Saved, but dictation failed to restart: " + data.reload_error, true);
     else flash(data.daemon_running ? "Applied. Dictation reloaded." : "Saved.", false);
     await load();
+  } catch (e) { flash(String(e), true); }
+  finally { btn.disabled = false; }
+};
+
+document.getElementById("test").onclick = async () => {
+  const btn = document.getElementById("test");
+  btn.disabled = true;
+  flash("Testing...", false);
+  try {
+    const r = await post("/api/cleanup/test", { url: state.config.cleanup.api_url, model: state.config.cleanup.api_model });
+    const data = await r.json();
+    if (!r.ok || !data.ok) flash(data.error || "test failed", true);
+    else flash("It works: " + data.text, false);
   } catch (e) { flash(String(e), true); }
   finally { btn.disabled = false; }
 };

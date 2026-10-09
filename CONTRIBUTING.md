@@ -63,6 +63,8 @@ The keyring line matters on a Mac. Without it, the engine looks for a Keychain i
 ./packaging/macos/build.sh        # dist/local-stt-<version>.dmg
 ```
 
+To change the version, run `packaging/set_version.sh 0.3.0`. The version is kept in five files and two lockfiles, and `build.sh` stops if they disagree.
+
 The script bundles a standalone Python with the packages pinned in `uv.lock`, builds the Tauri app and signs it. Sign with a self-signed "local-stt Dev" certificate (see the [user guide](docs/user-guide.md#install)). macOS keeps the app's permissions across rebuilds only when the signature stays the same.
 
 ## Where things go

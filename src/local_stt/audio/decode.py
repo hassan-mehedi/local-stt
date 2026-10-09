@@ -10,7 +10,16 @@ from pathlib import Path
 
 import numpy as np
 
-TARGET_RATE = 16000
+SAMPLE_RATE = 16000  # what every speech model here expects
+
+
+def write_wav(path: Path, pcm: np.ndarray) -> None:
+    """Writes float32 PCM at SAMPLE_RATE as a 16-bit mono WAV."""
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes((np.clip(pcm, -1.0, 1.0) * 32767).astype("<i2").tobytes())
 
 
 def _read_pcm16_wav(path: Path) -> np.ndarray | None:
@@ -27,10 +36,10 @@ def _read_pcm16_wav(path: Path) -> np.ndarray | None:
     pcm = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
     if channels > 1:
         pcm = pcm[: len(pcm) // channels * channels].reshape(-1, channels).mean(axis=1)
-    if rate != TARGET_RATE and len(pcm):
+    if rate != SAMPLE_RATE and len(pcm):
         import soxr
 
-        pcm = soxr.resample(pcm, rate, TARGET_RATE)
+        pcm = soxr.resample(pcm, rate, SAMPLE_RATE)
     return pcm.astype(np.float32, copy=False)
 
 
@@ -50,7 +59,7 @@ def decode_to_pcm(path: Path) -> np.ndarray:
         [
             "ffmpeg", "-v", "error",
             "-i", str(path),
-            "-f", "f32le", "-ac", "1", "-ar", str(TARGET_RATE),
+            "-f", "f32le", "-ac", "1", "-ar", str(SAMPLE_RATE),
             "-",
         ],
         capture_output=True,

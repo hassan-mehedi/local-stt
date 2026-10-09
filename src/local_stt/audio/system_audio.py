@@ -9,6 +9,8 @@ import signal
 import subprocess
 from pathlib import Path
 
+from .decode import SAMPLE_RATE
+
 log = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ class PwRecorder:
                 "pw-record is required for meeting recording. "
                 "Install it with: sudo apt install pipewire-bin"
             )
-        cmd = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16"]
+        cmd = ["pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1", "--format", "s16"]
         if self.capture_sink:
             cmd += ["-P", "{ stream.capture.sink = true }"]
         cmd.append(str(self.dest))

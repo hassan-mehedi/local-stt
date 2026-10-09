@@ -62,3 +62,20 @@ class AsrBackend(ABC):
     @abstractmethod
     def unload(self) -> None:
         """Free VRAM."""
+
+
+def build_backend(cfg, model: str | None = None, device: str | None = None) -> AsrBackend:
+    """The backend for `model` (default: the configured one), not loaded yet."""
+    from . import models
+
+    name = model or cfg.model.name
+    if models.spec(name).family == models.PARAKEET:
+        from .parakeet_mlx_backend import ParakeetMlxBackend
+
+        return ParakeetMlxBackend(model_name=name)
+
+    from .faster_whisper_backend import FasterWhisperBackend
+
+    return FasterWhisperBackend(
+        model_name=name, device=device or cfg.model.device, compute_type=cfg.model.compute_type
+    )

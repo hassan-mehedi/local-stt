@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..audio.capture import Recorder
+from ..audio.decode import SAMPLE_RATE
 from ..cleanup.rewrite import make_cleaner, rewrite
 from ..config import Config
 from ..desktop import notify
@@ -154,7 +155,7 @@ class DictationDaemon:
                 self._cap_timer.cancel()
                 self._cap_timer = None
             pcm = self.recorder.stop()
-        ms = len(pcm) / 16.0
+        ms = len(pcm) * 1000 / SAMPLE_RATE
         if ms < self.config.dictation.min_duration_ms:
             log.info("discarded %dms utterance (too short)", ms)
             self._state("idle")
@@ -175,7 +176,7 @@ class DictationDaemon:
             pcm, app = item
             t0 = time.monotonic()
             try:
-                transcript = self.backend.transcribe_audio(pcm, 16000, opts)
+                transcript = self.backend.transcribe_audio(pcm, SAMPLE_RATE, opts)
             except Exception:
                 log.exception("transcription failed")
                 self._state("idle")
@@ -239,7 +240,7 @@ class DictationDaemon:
         self.backend.load()  # pay the load cost now, not on first utterance
         # warm the kernels so the first real utterance isn't slow
         self.backend.transcribe_audio(
-            np.zeros(8000, dtype=np.float32), 16000, TranscribeOptions()
+            np.zeros(SAMPLE_RATE // 2, dtype=np.float32), SAMPLE_RATE, TranscribeOptions()
         )
         verb = "hold" if self.config.dictation.mode == "hold" else "press"
         log.info("ready: %s %s to dictate", verb, self.config.dictation.hotkey)

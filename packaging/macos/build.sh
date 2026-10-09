@@ -13,6 +13,9 @@ root=$PWD
 engine=app/src-tauri/engine
 python=3.12
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+for f in src/local_stt/__init__.py app/package.json app/src-tauri/Cargo.toml app/src-tauri/tauri.conf.json; do
+    grep -q "\"$version\"" "$f" || { echo "error: $f is not at version $version; run packaging/set_version.sh $version" >&2; exit 1; }
+done
 
 tmp=$(mktemp -d -t local-stt-build)
 trap 'rm -rf "$tmp"' EXIT

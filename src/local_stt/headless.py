@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from . import tray
+from .audio.decode import SAMPLE_RATE
 from .config import Config, load_config, onboarding_done
 from .desktop import set_notify_handler
 from .store import FrontApp, Store
@@ -165,7 +166,7 @@ class EngineApp(tray.TrayApp):
 
     def _on_text(self, utt) -> None:
         row = self.store.add_dictation(
-            utt.text, audio_ms=round(len(utt.pcm) / 16), elapsed_ms=utt.elapsed_ms,
+            utt.text, audio_ms=round(len(utt.pcm) * 1000 / SAMPLE_RATE), elapsed_ms=utt.elapsed_ms,
             app=utt.app, pcm=utt.pcm, raw_text=utt.raw,
         )
         self.events.publish("dictation", {"item": row, "error": utt.error})

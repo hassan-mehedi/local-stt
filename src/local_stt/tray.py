@@ -81,12 +81,12 @@ class TrayApp:
 
     def _start_daemon_locked(self, notify: bool = True) -> str | None:
         """Returns an error message if the daemon failed to start."""
-        from .cli import _build_backend
         from .dictation.daemon import DictationDaemon
+        from .engine import backend as asr
 
         backend = daemon = None
         try:
-            backend = _build_backend(self.config)
+            backend = asr.build_backend(self.config)
             daemon = DictationDaemon(
                 self.config, backend, on_state=self._on_dictation_state, **self._daemon_hooks()
             )
@@ -205,7 +205,7 @@ class TrayApp:
 
     def _transcribe_meeting(self, rec) -> None:
         try:
-            from .cli import _transcribe_session
+            from .meeting.transcribe import transcribe_session
 
             # reuse the dictation daemon's already-loaded model if it's the
             # one this meeting needs, so we don't load a second copy
@@ -215,9 +215,7 @@ class TrayApp:
                 if daemon is not None and daemon.config.model.name == rec.model
                 else None
             )
-            _transcribe_session(
-                rec.session_dir, title=rec.title, cfg=self.config, backend=backend
-            )
+            transcribe_session(rec.session_dir, rec.title, self.config, backend=backend)
             _notify("Transcript ready", str(rec.session_dir / "transcript.md"))
         except Exception as e:
             log.exception("meeting transcription failed")

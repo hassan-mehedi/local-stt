@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
-from ..engine.backend import AsrBackend, Transcript, TranscribeOptions
+from ..engine.backend import AsrBackend, Transcript, TranscribeOptions, build_backend
+from ..export import export
+
+log = logging.getLogger(__name__)
 
 SETTINGS_FILE = "session.json"
 
@@ -73,3 +78,53 @@ def transcribe_meeting(
     mine = label(backend.transcribe_file(mic_wav, opts), "Me")
     theirs = label(backend.transcribe_file(system_wav, opts), "Them")
     return merge(mine, theirs)
+
+
+def transcribe_session(
+    session_dir: Path, title: str, cfg, model: str | None = None, language: str | None = None,
+    diarize: bool = False, backend: AsrBackend | None = None,
+    progress_cb: Callable[[float, float], None] | None = None,
+) -> list[Path]:
+    """Transcribes a recorded session into transcript.md, .json and .srt next to
+    its tracks. A given backend (the dictation model) is used instead of a new one."""
+    mic_wav = session_dir / "raw" / "mic.wav"
+    system_wav = session_dir / "raw" / "system.wav"
+    for p in (mic_wav, system_wav):
+        if not p.exists():
+            raise FileNotFoundError(f"{p} not found; is this a meeting session folder?")
+
+    saved = load_settings(session_dir)
+    model, language = choose_model(
+        cfg, model or saved.get("model"), language if language is not None else saved.get("language")
+    )
+    owns_backend = backend is None
+    if backend is None:
+        backend = build_backend(cfg, model)
+    log.info("transcribing %s with %s, language %s", session_dir.name, model, language or "auto")
+    opts = TranscribeOptions(language=language or None, batched=True, progress_cb=progress_cb)
+    transcript = transcribe_meeting(mic_wav, system_wav, backend, opts)
+
+    if diarize:
+        if owns_backend:
+            backend.unload()  # free VRAM before loading pyannote
+        transcript = _diarize(transcript, system_wav, cfg.diarize.hf_token or None)
+
+    written = []
+    for fmt in ("md", "json", "srt"):
+        dest = session_dir / f"transcript.{fmt}"
+        export(transcript, fmt, dest, title=title)
+        written.append(dest)
+    return written
+
+
+def _diarize(transcript: Transcript, system_wav: Path, hf_token: str | None) -> Transcript:
+    from .diarize import assign_speakers, diarize_wav
+
+    log.info("diarizing the Them track...")
+    turns = diarize_wav(system_wav, hf_token=hf_token)
+    them = [s for s in transcript.segments if s.speaker == "Them"]
+    relabeled = {id(s): r for s, r in zip(them, assign_speakers(them, turns))}
+    transcript = replace(transcript, segments=[relabeled.get(id(s), s) for s in transcript.segments])
+    n = len({s.speaker for s in transcript.segments if s.speaker != "Me"})
+    log.info("found %d remote speaker(s)", n)
+    return transcript

@@ -7,12 +7,13 @@ import re
 import sqlite3
 import threading
 import time
-import wave
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+
+from .audio.decode import write_wav
 
 DATA_DIR = Path.home() / ".local" / "share" / "local-stt"
 DB_PATH = DATA_DIR / "history.db"
@@ -119,12 +120,7 @@ class Store:
 
     def _save_audio(self, row_id: int, pcm: np.ndarray) -> None:
         self.audio_dir.mkdir(parents=True, exist_ok=True)
-        samples = (np.clip(pcm, -1.0, 1.0) * 32767).astype("<i2")
-        with wave.open(str(self.audio_path(row_id)), "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(16000)
-            w.writeframes(samples.tobytes())
+        write_wav(self.audio_path(row_id), pcm)
 
     def audio_path(self, row_id: int) -> Path:
         return self.audio_dir / f"{int(row_id)}.wav"

@@ -50,6 +50,14 @@ def open_target(target: str) -> None:
     subprocess.Popen([opener, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def reveal(path: Path) -> None:
+    """Show a file or folder selected in Finder, or open its parent on Linux."""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)])
+    else:
+        open_target(str(path.parent))
+
+
 def app_bundle() -> Path | None:
     """The local-stt.app this runs from, or None for a source install."""
     return next((p for p in Path(__file__).resolve().parents if p.suffix == ".app"), None)

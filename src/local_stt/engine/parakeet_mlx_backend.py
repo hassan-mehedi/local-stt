@@ -10,12 +10,12 @@ from pathlib import Path
 
 import numpy as np
 
+from ..audio.decode import SAMPLE_RATE
 from . import models
 from .backend import AsrBackend, Segment, Transcript, TranscribeOptions, Word
 
 log = logging.getLogger(__name__)
 
-SAMPLE_RATE = 16000
 # audio longer than this is split into overlapping chunks, which bounds memory
 CHUNK_S = 120.0
 OVERLAP_S = 15.0

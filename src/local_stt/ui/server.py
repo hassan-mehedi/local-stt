@@ -24,12 +24,14 @@ from ..config import (
     default_model,
     load_config,
     load_onboarding,
+    merge_config,
     mark_onboarding_done,
     save_config,
     save_onboarding,
 )
 from ..desktop import app_bundle
 from ..engine import models
+from ..engine.downloads import downloads
 from . import app_api
 from .state import clear_state, write_state
 
@@ -41,8 +43,8 @@ APP_ORIGINS = frozenset({"tauri://localhost", "http://tauri.localhost", "http://
 STATIC_DIR = Path(__file__).parent / "static"
 PAGES = {"/": "settings.html", "/onboarding": "onboarding.html"}
 ASSETS = {
-    "/static/common.css": "text/css; charset=utf-8",
-    "/static/common.js": "text/javascript; charset=utf-8",
+    "/static/base.css": "text/css; charset=utf-8",
+    "/static/controls.js": "text/javascript; charset=utf-8",
 }
 
 class Controller:
@@ -97,7 +99,7 @@ def build_state(controller: Controller) -> dict:
         }
         for spec in models.MODELS.values()
     ]
-    downloading = _downloads.status()
+    downloading = downloads.status()
     return {
         "cleanup": {
             "key_saved": bool(cfg.cleanup.api_url and keychain.get_key(cfg.cleanup.api_url)),
@@ -125,68 +127,6 @@ def permissions_state() -> dict:
         "login_item": permissions.login_item(),
         "app_bundle": app_bundle() is not None,
     }
-
-
-def _config_from_payload(payload: dict) -> Config:
-    """Build a Config from posted sections, ignoring unknown keys."""
-    from ..config import (
-        CleanupConfig,
-        DiarizeConfig,
-        DictationConfig,
-        MeetingConfig,
-        ModelConfig,
-        _section,
-    )
-
-    base = load_config()
-    return Config(
-        model=_section(ModelConfig, {**asdict(base.model), **payload.get("model", {})}),
-        dictation=_section(
-            DictationConfig, {**asdict(base.dictation), **payload.get("dictation", {})}
-        ),
-        meeting=_section(
-            MeetingConfig, {**asdict(base.meeting), **payload.get("meeting", {})}
-        ),
-        cleanup=_section(
-            CleanupConfig, {**asdict(base.cleanup), **payload.get("cleanup", {})}
-        ),
-        diarize=_section(
-            DiarizeConfig, {**asdict(base.diarize), **payload.get("diarize", {})}
-        ),
-    )
-
-
-class _Downloads:
-    """Tracks background model downloads for progress polling."""
-
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._state: dict[str, str] = {}  # model -> "running"|"done"|"error: ..."
-
-    def status(self) -> dict[str, str]:
-        with self._lock:
-            return dict(self._state)
-
-    def start(self, name: str) -> None:
-        models.model_dir(name)  # rejects unknown names before a thread starts
-        with self._lock:
-            if self._state.get(name) == "running":
-                return
-            self._state[name] = "running"
-        threading.Thread(target=self._run, args=(name,), daemon=True).start()
-
-    def _run(self, name: str) -> None:
-        try:
-            models.download(name)
-            with self._lock:
-                self._state[name] = "done"
-        except Exception as e:
-            log.exception("download failed: %s", name)
-            with self._lock:
-                self._state[name] = f"error: {e}"
-
-
-_downloads = _Downloads()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -333,7 +273,7 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/api/config":
                 return self._save_config()
             if path == "/api/models/download":
-                _downloads.start(self._read_json()["name"])
+                downloads.start(self._read_json()["name"])
                 return self._send_json({"ok": True})
             if path == "/api/models/remove":
                 models.remove(self._read_json()["name"])
@@ -383,7 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
         return self._send_json({"error": "not found"}, 404)
 
     def _save_config(self):
-        cfg = _config_from_payload(self._read_json())
+        cfg = merge_config(load_config(), self._read_json())
         save_config(cfg)
         reload_error = self.controller.apply_config(cfg)
         return self._send_json({

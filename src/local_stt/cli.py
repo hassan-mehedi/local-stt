@@ -13,25 +13,6 @@ from . import __version__
 from .config import load_config
 
 
-def _build_backend(cfg, model_override=None, device_override=None):
-    from .engine import models
-
-    name = model_override or cfg.model.name
-    if models.spec(name).family == models.PARAKEET:
-        from .engine.parakeet_mlx_backend import ParakeetMlxBackend
-
-        return ParakeetMlxBackend(model_name=name)
-
-    from .engine.faster_whisper_backend import FasterWhisperBackend
-
-    return FasterWhisperBackend(
-        model_name=name,
-        device=device_override or cfg.model.device,
-        compute_type=cfg.model.compute_type,
-    )
-
-
-
 def cmd_dictate(args) -> int:
     cfg = load_config()
     if args.model:
@@ -40,14 +21,15 @@ def cmd_dictate(args) -> int:
         cfg.dictation.hotkey = args.hotkey
 
     from .dictation.daemon import DictationDaemon
+    from .engine.backend import build_backend
 
-    daemon = DictationDaemon(cfg, _build_backend(cfg))
+    daemon = DictationDaemon(cfg, build_backend(cfg))
     daemon.run()
     return 0
 
 
 def cmd_file(args) -> int:
-    from .engine.backend import TranscribeOptions
+    from .engine.backend import TranscribeOptions, build_backend
     from .export import FORMATS, export
 
     cfg = load_config()
@@ -60,7 +42,7 @@ def cmd_file(args) -> int:
             )
             return 1
 
-    backend = _build_backend(cfg, model_override=args.model)
+    backend = build_backend(cfg, args.model)
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else None
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -100,69 +82,16 @@ def cmd_file(args) -> int:
     return 0
 
 
-def _transcribe_session(
-    session_dir: Path, title: str, cfg, model_override=None, language_override=None,
-    diarize=False, backend=None,
-) -> int:
-    from .engine.backend import TranscribeOptions
-    from .export import export
-    from .meeting.transcribe import choose_model, load_settings, transcribe_meeting
-
-    mic_wav = session_dir / "raw" / "mic.wav"
-    system_wav = session_dir / "raw" / "system.wav"
-    for p in (mic_wav, system_wav):
-        if not p.exists():
-            print(f"error: {p} not found; is this a meeting session dir?", file=sys.stderr)
-            return 1
-
-    # what the session was recorded with, unless overridden now
-    saved = load_settings(session_dir)
-    model, language = choose_model(
-        cfg,
-        model_override or saved.get("model"),
-        language_override if language_override is not None else saved.get("language"),
-    )
-
-    # Reuse a caller-supplied backend (e.g. the tray's resident dictation
-    # model) instead of loading a second copy into VRAM.
-    owns_backend = backend is None
-    if backend is None:
-        backend = _build_backend(cfg, model_override=model)
-    print(f"  model {model}, language {language or 'auto'}", file=sys.stderr)
+def _transcribe_session(session_dir: Path, title: str, cfg, **kwargs) -> int:
+    from .meeting.transcribe import transcribe_session
 
     def progress(done: float, total: float):
         pct = 100 * done / total if total else 0
         print(f"\r  {pct:5.1f}%", end="", file=sys.stderr, flush=True)
 
-    opts = TranscribeOptions(
-        language=language or None,
-        batched=True,
-        progress_cb=progress,
-    )
-    transcript = transcribe_meeting(mic_wav, system_wav, backend, opts)
-    print(file=sys.stderr)
-
-    if diarize:
-        from dataclasses import replace
-
-        from .meeting.diarize import assign_speakers, diarize_wav
-
-        if owns_backend:
-            backend.unload()  # free VRAM before loading pyannote
-        print("  diarizing the Them track...", file=sys.stderr)
-        turns = diarize_wav(system_wav, hf_token=cfg.diarize.hf_token or None)
-        them = [s for s in transcript.segments if s.speaker == "Them"]
-        relabeled = {id(s): r for s, r in zip(them, assign_speakers(them, turns))}
-        transcript = replace(
-            transcript,
-            segments=[relabeled.get(id(s), s) for s in transcript.segments],
-        )
-        n = len({s.speaker for s in transcript.segments if s.speaker != "Me"})
-        print(f"  found {n} remote speaker(s)", file=sys.stderr)
-
-    for fmt in ("md", "json", "srt"):
-        dest = session_dir / f"transcript.{fmt}"
-        export(transcript, fmt, dest, title=title)
+    written = transcribe_session(session_dir, title, cfg, progress_cb=progress, **kwargs)
+    print(file=sys.stderr)  # newline after \r progress
+    for dest in written:
         print(f"  wrote {dest}", file=sys.stderr)
     return 0
 
@@ -187,9 +116,8 @@ def cmd_meeting(args) -> int:
             return 1
         session_dir = Path(args.dir).expanduser().resolve()
         return _transcribe_session(
-            session_dir, title=session_dir.name, cfg=cfg,
-            model_override=args.model, language_override=args.language,
-            diarize=args.diarize,
+            session_dir, session_dir.name, cfg,
+            model=args.model, language=args.language, diarize=args.diarize,
         )
 
     from .meeting.transcribe import choose_model, save_settings
@@ -214,10 +142,7 @@ def cmd_meeting(args) -> int:
     recorder.stop()
     print("\nRecording stopped. Transcribing...", file=sys.stderr)
     return _transcribe_session(
-        recorder.session_dir,
-        title=f"{title}, {datetime.now():%Y-%m-%d}",
-        cfg=cfg,
-        diarize=args.diarize,
+        recorder.session_dir, f"{title}, {datetime.now():%Y-%m-%d}", cfg, diarize=args.diarize
     )
 
 

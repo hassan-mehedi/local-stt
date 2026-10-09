@@ -13,6 +13,7 @@ uvx ruff check .                      # lint, rules in pyproject.toml
 pnpm -C app exec tsc --noEmit         # type-check the app
 pnpm -C app tauri dev                 # run the app; the engine runs via `uv run stt engine`
 ./packaging/macos/build.sh            # signed app + dist/local-stt-<version>.dmg
+packaging/set_version.sh 0.3.0        # the version, in all five files and both lockfiles
 ```
 
 There is no CI. Run the tests, ruff and tsc yourself before you call a change done. For a change to the app UI, check it in a browser with Playwright too: start `uv run stt engine` (its first line has the port and token), run `pnpm -C app dev`, and open `http://localhost:1420/?port=<port>&token=<token>`.

@@ -8,9 +8,10 @@ import threading
 
 import numpy as np
 
+from .decode import SAMPLE_RATE
+
 log = logging.getLogger(__name__)
 
-TARGET_RATE = 16000
 STOP_TIMEOUT_S = 0.5
 
 
@@ -23,7 +24,7 @@ class Recorder:
         self.on_level = on_level
         self._stream = None
         self._frames: list[np.ndarray] = []
-        self._rate = TARGET_RATE
+        self._rate = SAMPLE_RATE
         self._lock = threading.Lock()
 
     @property
@@ -51,10 +52,10 @@ class Recorder:
 
             try:
                 self._stream = sd.InputStream(
-                    samplerate=TARGET_RATE, channels=1, dtype="float32",
+                    samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                     device=self.device, callback=callback,
                 )
-                self._rate = TARGET_RATE
+                self._rate = SAMPLE_RATE
             except sd.PortAudioError:
                 # device refuses 16kHz; use its default rate and resample later
                 info = sd.query_devices(self.device, kind="input")
@@ -83,10 +84,10 @@ class Recorder:
             if self._frames is frames:
                 self._frames = []
         pcm = np.concatenate(frames) if frames else np.zeros(0, dtype=np.float32)
-        if rate != TARGET_RATE and len(pcm):
+        if rate != SAMPLE_RATE and len(pcm):
             import soxr
 
-            pcm = soxr.resample(pcm, rate, TARGET_RATE)
+            pcm = soxr.resample(pcm, rate, SAMPLE_RATE)
         return pcm.astype(np.float32, copy=False)
 
 
