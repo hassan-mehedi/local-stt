@@ -11,7 +11,11 @@ This guide is for the Mac app. For Linux, or the `stt` command line, see the [RE
 
 ## Install
 
-There is no download yet, so you build the app once from the source code.
+1. Download `local-stt-<version>.dmg` from the [latest release](https://github.com/hassan-mehedi/local-stt/releases/latest).
+2. Open the DMG and drag local-stt into Applications.
+3. Open local-stt. macOS blocks it the first time, because the app is signed with a self-made certificate, not an Apple one. Go to System Settings > Privacy & Security and click Open Anyway.
+
+### Build it yourself instead
 
 1. Install the tools:
    ```bash
@@ -27,7 +31,7 @@ There is no download yet, so you build the app once from the source code.
    cd local-stt
    ./packaging/macos/build.sh
    ```
-4. Open `dist/local-stt-0.2.0.dmg` and drag local-stt into Applications.
+4. Open `dist/local-stt-<version>.dmg` and drag local-stt into Applications. An app you built yourself opens without the Open Anyway step.
 
 ## First launch
 

@@ -110,7 +110,9 @@ Only one tray runs at a time: the service plus a manual `stt tray` won't double 
 
 ### Install the app
 
-Build the DMG once. It needs uv, [pnpm](https://pnpm.io), [Rust](https://rustup.rs) and the Xcode command line tools, and takes about 5 minutes:
+Download the DMG from the [latest release](https://github.com/hassan-mehedi/local-stt/releases/latest). macOS blocks the first launch because the app has no Apple signature; click Open Anyway in System Settings > Privacy & Security. The [user guide](docs/user-guide.md) walks through setup.
+
+Or build the DMG yourself. It needs uv, [pnpm](https://pnpm.io), [Rust](https://rustup.rs) and the Xcode command line tools, and takes about 5 minutes:
 
 ```bash
 ./packaging/macos/build.sh    # writes dist/local-stt-<version>.dmg
