@@ -127,7 +127,15 @@ class MacTypeOutput(TextOutput):
         self._keyboard = Controller()
 
     def emit(self, text: str) -> None:
-        self._keyboard.type(text)
+        from pynput.keyboard import Key
+
+        # pynput types "\n" as Enter, which sends the message in chat boxes and terminals
+        for i, line in enumerate(text.replace("\r\n", "\n").split("\n")):
+            if i:
+                with self._keyboard.pressed(Key.shift):
+                    self._keyboard.tap(Key.enter)
+            if line:
+                self._keyboard.type(line)
 
 
 class MacClipboardOutput(TextOutput):
